@@ -27,12 +27,14 @@ struct N3VectorKey {
     float samplingRate = 30.0F;
     std::vector<N3Vector3> values;
     [[nodiscard]] N3Vector3 sample(float frame, const N3Vector3& fallback) const noexcept;
+    [[nodiscard]] float lastFrame() const noexcept;
 };
 
 struct N3QuaternionKey {
     float samplingRate = 30.0F;
     std::vector<N3Quaternion> values;
     [[nodiscard]] N3Quaternion sample(float frame, const N3Quaternion& fallback) const noexcept;
+    [[nodiscard]] float lastFrame() const noexcept;
 };
 
 struct N3Joint {
@@ -53,6 +55,7 @@ public:
     [[nodiscard]] static N3Skeleton load(const std::filesystem::path& path);
     [[nodiscard]] const std::vector<N3Joint>& joints() const noexcept { return joints_; }
     [[nodiscard]] const std::vector<N3Matrix4>& bindWorldMatrices() const noexcept { return bindWorld_; }
+    [[nodiscard]] float maximumFrame() const noexcept { return maximumFrame_; }
     [[nodiscard]] std::vector<N3Matrix4> worldMatrices(float frame) const;
     [[nodiscard]] std::vector<N3Matrix4> skinMatrices(float frame) const;
 
@@ -60,6 +63,7 @@ private:
     std::vector<N3Joint> joints_;
     std::vector<N3Matrix4> bindWorld_;
     std::vector<N3Matrix4> inverseBindWorld_;
+    float maximumFrame_ = 0.0F;
 };
 
 } // namespace korework::content
