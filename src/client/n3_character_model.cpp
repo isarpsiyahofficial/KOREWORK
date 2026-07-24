@@ -1,5 +1,7 @@
 #include "client/n3_character_model.hpp"
 
+#include "content/n3_texture.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -73,6 +75,7 @@ bool N3CharacterModel::load(const content::N3Character& character, std::size_t p
         const float centerZ = (bounds.minimumZ + bounds.maximumZ) * 0.5F;
         sourceHeight_ = bounds.maximumY - bounds.minimumY;
         models_.reserve(selectedParts);
+        textures_.reserve(selectedParts);
 
         for (const auto& part : character.parts) {
             const auto* lod = selectLod(part, preferredLod);
@@ -134,7 +137,29 @@ bool N3CharacterModel::load(const content::N3Character& character, std::size_t p
             model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = {
                 channel(part.diffuse[0]), channel(part.diffuse[1]), channel(part.diffuse[2]), channel(part.diffuse[3])
             };
+
+            Texture2D gpuTexture {};
+            if (!part.texturePath.empty()) {
+                try {
+                    auto textureData = content::N3TextureLoader::load(part.texturePath);
+                    Image image {};
+                    image.data = textureData.rgba.data();
+                    image.width = textureData.width;
+                    image.height = textureData.height;
+                    image.mipmaps = 1;
+                    image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+                    gpuTexture = LoadTextureFromImage(image);
+                    if (gpuTexture.id == 0U) throw std::runtime_error("GPU texture creation returned id 0");
+                    SetTextureFilter(gpuTexture, TEXTURE_FILTER_BILINEAR);
+                    model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = gpuTexture;
+                } catch (...) {
+                    UnloadModel(model);
+                    throw;
+                }
+            }
+
             models_.push_back(model);
+            if (gpuTexture.id != 0U) textures_.push_back(gpuTexture);
         }
 
         if (models_.empty()) throw std::runtime_error("No N3 character parts could be converted to render meshes");
@@ -150,6 +175,8 @@ bool N3CharacterModel::load(const content::N3Character& character, std::size_t p
 void N3CharacterModel::unload() noexcept {
     for (Model& model : models_) UnloadModel(model);
     models_.clear();
+    for (Texture2D texture : textures_) if (texture.id != 0U) UnloadTexture(texture);
+    textures_.clear();
     ready_ = false;
     sourceHeight_ = 0.0F;
 }
