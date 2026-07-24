@@ -2,69 +2,48 @@
 
 Knight Online Fire Drake v1453 dönemini temel alan, Windows ve Linux uyumlu offline PC rework projesi.
 
-## Offline çalışma modeli
+## Mevcut durum
 
-KOREWORK tek süreç olarak çalışır:
+> **Önemli:** Repodaki mevcut küçük executable, yalnızca tek süreçte sunucusuz çalışma yaklaşımını doğrulayan teknik bir prototiptir. Fire Drake offline rework tamamlanmış değildir ve bu prototip nihai oyun olarak kabul edilmez.
 
-- GameServer çalıştırmaz.
-- AIServer çalıştırmaz.
-- LoginServer çalıştırmaz.
-- SQL Server, PostgreSQL, MySQL veya SQLite sunucusu istemez.
-- `localhost` bağlantısı açmaz.
-- Socket veya ağ bağlantısı kullanmaz.
-- Karakter, canavar, skill, drop ve kayıt işlemlerini aynı executable içinde yürütür.
-- Kayıt dosyasını kullanıcının profil dizininde `.korework/saves/offline_profile.kosave` altında tutar.
+Gerçek offline sürümün tamamlanmış sayılması için aşağıdakilerin oyuna aktarılması ve birlikte çalışması gerekir:
 
-İnternet yalnızca kaynak kod derlenirken raylib bağımlılığını almak için kullanılır. Oluşturulan oyun executable'ı çevrimdışı çalışır.
+- Fire Drake haritaları, terrain, collision, warp ve spawn verileri
+- Karakter modelleri, iskeletler ve animasyonlar
+- Zırh, silah, kalkan ve ekipman görünüm değişimleri
+- Canavar modelleri, animasyonları, AI kayıtları ve spawn tabloları
+- Skill tabloları, animasyon zamanlamaları, efektler, projectile ve buff/debuff mantıkları
+- Warrior, Rogue, Mage ve Priest jobları ile stat/katsayı sistemleri
+- Item, drop, upgrade, envanter ve ekipman kuralları
+- NPC, görev, mağaza ve etkileşim verileri
+- Fire Drake dönemine uygun HUD ve tek responsive `1 2 3 4 5 6 7 8 9 0` skill bar
+- Yerel karakter oluşturma, seçme, kayıt/yükleme ve haritaya giriş
+- Windows ve Linux üzerinde aynı içerikle açılabilen build
 
-## İlk oynanabilir çekirdek
+Bu maddeler gerçekleşmeden proje “oynanabilir Fire Drake offline sürümü” olarak tanımlanmayacaktır.
 
-- Yeniden boyutlandırılabilir 3D Windows/Linux istemcisi
-- WASD hareket ve üçüncü şahıs kamera
-- OpenKO/Fire Drake `K_MONSTER` kayıtlarından Kecoon ailesi
-- Canavar takip, saldırı, ölüm ve respawn AI'sı
-- HP, MP, EXP, level ve Noah
-- Skill hasarı, mana maliyeti ve cooldown
-- Tek responsive skill bar: `1 2 3 4 5 6 7 8 9 0`
-- Drop ve envanter
-- Otomatik yerel kayıt/yükleme
-- Responsive HUD ve minimap
+## Hedef offline çalışma modeli
 
-## Kontroller
+Nihai KOREWORK tek süreç olarak çalışacaktır:
 
-- `W A S D`: hareket
-- `Sol Shift`: koşu
-- `Sağ mouse`: kamera
-- `Mouse tekerleği`: yakınlaştırma
-- `1–9, 0`: skill kullanımı
-- `I`: envanter
-- `F5`: kaydet
+- GameServer çalıştırmayacak.
+- AIServer çalıştırmayacak.
+- LoginServer çalıştırmayacak.
+- SQL Server, PostgreSQL, MySQL veya SQLite sunucusu istemeyecek.
+- `localhost` bağlantısı açmayacak.
+- Socket veya ağ bağlantısı kullanmayacak.
+- Karakter, harita, canavar, skill, drop ve kayıt işlemlerini aynı executable içinde yürütecek.
+- Kayıt dosyalarını kullanıcının profil dizininde tutacak.
 
-## Derleme
+## Teknik prototipte doğrulananlar
 
-### Windows
+- Tek süreçte çalışan Windows/Linux executable
+- Socket, localhost ve SQL olmadan runtime
+- Yerel kayıt/yükleme yaklaşımı
+- Basit hareket, kamera, AI, saldırı, drop ve envanter döngüsü
+- Responsive 10 slotlu `1 2 3 4 5 6 7 8 9 0` skill bar yaklaşımı
 
-```powershell
-cmake -S . -B build -A x64 -DBUILD_TESTING=ON
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
-```
-
-Çıktı: `build/bin/Release/KOREWORK.exe`
-
-### Linux
-
-Gerekli geliştirme paketleri kurulduktan sonra:
-
-```bash
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-cmake --build build
-ctest --test-dir build --output-on-failure
-```
-
-Çıktı: `build/bin/KOREWORK`
-
-GitHub Actions her değişiklikte Windows ve Linux paketlerini otomatik üretir.
+Bu maddeler yalnızca mimari doğrulamadır; Fire Drake içerik aktarımının yerine geçmez.
 
 ## Güvenlik ilkeleri
 
