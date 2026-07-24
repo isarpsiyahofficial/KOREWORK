@@ -1,0 +1,14 @@
+status=passed
+run_id=30124521837
+run_attempt=1
+validated_commit=c176f979da150dfef851bd9d2e5079fa3f448645
+branch=integration/deterministic-assets-v1
+linux=success
+windows=success
+real_smd_parser=passed
+real_n3_character_chain=passed
+real_n3_skeleton=passed
+real_n3_animation_metadata=passed
+real_n3_equipment_chain=passed
+real_ntf_texture_decode=passed
+generated_utc=2026-07-24T20:36:01Z
