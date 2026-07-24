@@ -2,3 +2,8 @@
 	path = upstream/fire-drake-v1453
 	url = https://github.com/ko4life-net/Fire-Drake-Project-v1453.git
 	branch = main
+
+[submodule "upstream/ko-assets"]
+	path = upstream/ko-assets
+	url = https://github.com/ko4life-net/ko-assets.git
+	branch = master
