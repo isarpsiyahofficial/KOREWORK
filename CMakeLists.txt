@@ -33,6 +33,7 @@ target_compile_definitions(korework_runtime PUBLIC KOREWORK_OFFLINE_ONLY=1)
 
 add_executable(korework
     src/main.cpp
+    src/client/smd_terrain.cpp
 )
 target_include_directories(korework PRIVATE src)
 target_link_libraries(korework PRIVATE korework_runtime raylib)
