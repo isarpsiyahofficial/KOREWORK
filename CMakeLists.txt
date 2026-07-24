@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(KOREWORKOffline VERSION 0.5.0 LANGUAGES CXX)
+project(KOREWORKOffline VERSION 0.5.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -75,6 +75,10 @@ if(BUILD_TESTING)
     add_executable(korework_smd_smoke tests/smd_map_smoke.cpp)
     target_link_libraries(korework_smd_smoke PRIVATE korework_content)
     add_test(NAME fire-drake-smd-smoke COMMAND korework_smd_smoke)
+
+    add_executable(korework_texture_smoke tests/n3_texture_smoke.cpp)
+    target_link_libraries(korework_texture_smoke PRIVATE korework_content)
+    add_test(NAME noah-texture-smoke COMMAND korework_texture_smoke)
 endif()
 
 install(TARGETS korework RUNTIME DESTINATION .)
