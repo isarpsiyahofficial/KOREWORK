@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 namespace korework::client {
 namespace {
@@ -54,28 +55,92 @@ struct Bounds {
 
 N3CharacterModel::~N3CharacterModel() { unload(); }
 
+content::N3Vector3 N3CharacterModel::skinVertex(
+    const PartRuntime& part,
+    std::size_t sourceVertex,
+    const std::vector<content::N3Matrix4>& skinMatrices) const {
+    if (sourceVertex >= part.bindPositions.size() || sourceVertex >= part.influences.size()) {
+        throw std::runtime_error("N3 dynamic skin source vertex is outside the part data");
+    }
+
+    const auto& bindPosition = part.bindPositions[sourceVertex];
+    const auto& influence = part.influences[sourceVertex];
+    if (influence.jointIndices.empty()) return bindPosition;
+    if (influence.jointIndices.size() != influence.weights.size()) {
+        throw std::runtime_error("N3 dynamic skin influence arrays are inconsistent");
+    }
+
+    content::N3Vector3 result {};
+    float totalWeight = 0.0F;
+    for (std::size_t index = 0; index < influence.jointIndices.size(); ++index) {
+        const std::int32_t jointIndex = influence.jointIndices[index];
+        const float weight = influence.weights[index];
+        if (jointIndex < 0 || static_cast<std::size_t>(jointIndex) >= skinMatrices.size()) {
+            throw std::runtime_error("N3 dynamic skin joint index is outside the skeleton");
+        }
+        if (!std::isfinite(weight) || weight < 0.0F) {
+            throw std::runtime_error("N3 dynamic skin contains an invalid weight");
+        }
+        const auto transformed = skinMatrices[static_cast<std::size_t>(jointIndex)].transformPoint(bindPosition);
+        result.x += transformed.x * weight;
+        result.y += transformed.y * weight;
+        result.z += transformed.z * weight;
+        totalWeight += weight;
+    }
+
+    if (totalWeight <= 0.00001F) return bindPosition;
+    if (std::fabs(totalWeight - 1.0F) > 0.0001F) {
+        result.x /= totalWeight;
+        result.y /= totalWeight;
+        result.z /= totalWeight;
+    }
+    return result;
+}
+
 bool N3CharacterModel::load(const content::N3Character& character, std::size_t preferredLod) {
     unload();
     error_.clear();
 
     try {
+        if (character.jointPath.empty()) {
+            throw std::runtime_error("N3 character is missing its skeleton reference");
+        }
+        skeleton_ = content::N3Skeleton::load(character.jointPath);
+        if (skeleton_.joints().empty()) {
+            throw std::runtime_error("N3 character skeleton contains no joints");
+        }
+
         Bounds bounds;
         std::size_t selectedParts = 0;
         for (const auto& part : character.parts) {
             const auto* lod = selectLod(part, preferredLod);
             if (lod == nullptr) continue;
+            if (lod->influences.size() != lod->bindPositions.size()) {
+                throw std::runtime_error("N3 skin influence count does not match bind-pose vertices");
+            }
             ++selectedParts;
             for (const auto& point : lod->bindPositions) bounds.include(point);
+            for (const auto& influence : lod->influences) {
+                if (influence.jointIndices.size() != influence.weights.size()) {
+                    throw std::runtime_error("N3 skin joint and weight arrays do not match");
+                }
+                for (const std::int32_t jointIndex : influence.jointIndices) {
+                    if (jointIndex < 0 || static_cast<std::size_t>(jointIndex) >= skeleton_.joints().size()) {
+                        throw std::runtime_error("N3 skin references a joint outside the skeleton");
+                    }
+                }
+            }
         }
         if (selectedParts == 0 || bounds.maximumY <= bounds.minimumY) {
             throw std::runtime_error("N3 character has no valid bind-pose geometry");
         }
 
-        const float centerX = (bounds.minimumX + bounds.maximumX) * 0.5F;
-        const float centerZ = (bounds.minimumZ + bounds.maximumZ) * 0.5F;
+        centerX_ = (bounds.minimumX + bounds.maximumX) * 0.5F;
+        centerZ_ = (bounds.minimumZ + bounds.maximumZ) * 0.5F;
+        minimumY_ = bounds.minimumY;
         sourceHeight_ = bounds.maximumY - bounds.minimumY;
-        models_.reserve(selectedParts);
-        textures_.reserve(selectedParts);
+        parts_.reserve(selectedParts);
+        const auto initialSkinMatrices = skeleton_.skinMatrices(0.0F);
 
         for (const auto& part : character.parts) {
             const auto* lod = selectLod(part, preferredLod);
@@ -88,6 +153,12 @@ bool N3CharacterModel::load(const content::N3Character& character, std::size_t p
             if (cornerCount > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
                 throw std::runtime_error("N3 character mesh is too large for raylib");
             }
+
+            PartRuntime runtimePart;
+            runtimePart.bindPositions = lod->bindPositions;
+            runtimePart.influences = lod->influences;
+            runtimePart.cornerSourceIndices.reserve(cornerCount);
+            runtimePart.gpuPositions.resize(cornerCount * 3U);
 
             Mesh mesh {};
             mesh.vertexCount = static_cast<int>(cornerCount);
@@ -113,12 +184,16 @@ bool N3CharacterModel::load(const content::N3Character& character, std::size_t p
                         break;
                     }
 
-                    const auto& point = lod->bindPositions[vertexIndex];
+                    runtimePart.cornerSourceIndices.push_back(vertexIndex);
+                    const auto point = skinVertex(runtimePart, vertexIndex, initialSkinMatrices);
                     const auto& normal = lod->normals[vertexIndex];
                     const content::N3Vector2 uv = uvIndex < lod->uvs.size() ? lod->uvs[uvIndex] : content::N3Vector2 {};
-                    mesh.vertices[output * 3U + 0U] = -point.x - centerX;
-                    mesh.vertices[output * 3U + 1U] = point.y - bounds.minimumY;
-                    mesh.vertices[output * 3U + 2U] = point.z - centerZ;
+                    runtimePart.gpuPositions[output * 3U + 0U] = -point.x - centerX_;
+                    runtimePart.gpuPositions[output * 3U + 1U] = point.y - minimumY_;
+                    runtimePart.gpuPositions[output * 3U + 2U] = point.z - centerZ_;
+                    mesh.vertices[output * 3U + 0U] = runtimePart.gpuPositions[output * 3U + 0U];
+                    mesh.vertices[output * 3U + 1U] = runtimePart.gpuPositions[output * 3U + 1U];
+                    mesh.vertices[output * 3U + 2U] = runtimePart.gpuPositions[output * 3U + 2U];
                     mesh.normals[output * 3U + 0U] = -normal.x;
                     mesh.normals[output * 3U + 1U] = normal.y;
                     mesh.normals[output * 3U + 2U] = normal.z;
@@ -132,13 +207,12 @@ bool N3CharacterModel::load(const content::N3Character& character, std::size_t p
                 throw std::runtime_error("N3 character face index exceeds bind-pose data");
             }
 
-            UploadMesh(&mesh, false);
-            Model model = LoadModelFromMesh(mesh);
-            model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = {
+            UploadMesh(&mesh, true);
+            runtimePart.model = LoadModelFromMesh(mesh);
+            runtimePart.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = {
                 channel(part.diffuse[0]), channel(part.diffuse[1]), channel(part.diffuse[2]), channel(part.diffuse[3])
             };
 
-            Texture2D gpuTexture {};
             if (!part.texturePath.empty()) {
                 try {
                     auto textureData = content::N3TextureLoader::load(part.texturePath);
@@ -148,21 +222,22 @@ bool N3CharacterModel::load(const content::N3Character& character, std::size_t p
                     image.height = textureData.height;
                     image.mipmaps = 1;
                     image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-                    gpuTexture = LoadTextureFromImage(image);
-                    if (gpuTexture.id == 0U) throw std::runtime_error("GPU texture creation returned id 0");
-                    SetTextureFilter(gpuTexture, TEXTURE_FILTER_BILINEAR);
-                    model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = gpuTexture;
+                    runtimePart.texture = LoadTextureFromImage(image);
+                    if (runtimePart.texture.id == 0U) throw std::runtime_error("GPU texture creation returned id 0");
+                    SetTextureFilter(runtimePart.texture, TEXTURE_FILTER_BILINEAR);
+                    runtimePart.model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = runtimePart.texture;
                 } catch (...) {
-                    UnloadModel(model);
+                    UnloadModel(runtimePart.model);
+                    if (runtimePart.texture.id != 0U) UnloadTexture(runtimePart.texture);
                     throw;
                 }
             }
 
-            models_.push_back(model);
-            if (gpuTexture.id != 0U) textures_.push_back(gpuTexture);
+            parts_.push_back(std::move(runtimePart));
         }
 
-        if (models_.empty()) throw std::runtime_error("No N3 character parts could be converted to render meshes");
+        if (parts_.empty()) throw std::runtime_error("No N3 character parts could be converted to render meshes");
+        animated_ = skeleton_.maximumFrame() > 0.0F;
         ready_ = true;
         return true;
     } catch (const std::exception& exception) {
@@ -172,19 +247,57 @@ bool N3CharacterModel::load(const content::N3Character& character, std::size_t p
     }
 }
 
+bool N3CharacterModel::updateAnimation(float frame) noexcept {
+    if (!ready_ || !animated_) return ready_;
+    try {
+        const auto skinMatrices = skeleton_.skinMatrices(frame);
+        for (PartRuntime& part : parts_) {
+            if (part.cornerSourceIndices.size() * 3U != part.gpuPositions.size()) {
+                throw std::runtime_error("N3 dynamic mesh corner mapping is inconsistent");
+            }
+            for (std::size_t corner = 0; corner < part.cornerSourceIndices.size(); ++corner) {
+                const auto point = skinVertex(part, part.cornerSourceIndices[corner], skinMatrices);
+                part.gpuPositions[corner * 3U + 0U] = -point.x - centerX_;
+                part.gpuPositions[corner * 3U + 1U] = point.y - minimumY_;
+                part.gpuPositions[corner * 3U + 2U] = point.z - centerZ_;
+            }
+            UpdateMeshBuffer(part.model.meshes[0], 0,
+                             part.gpuPositions.data(),
+                             static_cast<int>(part.gpuPositions.size() * sizeof(float)), 0);
+        }
+        return true;
+    } catch (const std::exception& exception) {
+        error_ = exception.what();
+        animated_ = false;
+        return false;
+    }
+}
+
+std::size_t N3CharacterModel::textureCount() const noexcept {
+    std::size_t count = 0;
+    for (const PartRuntime& part : parts_) if (part.texture.id != 0U) ++count;
+    return count;
+}
+
 void N3CharacterModel::unload() noexcept {
-    for (Model& model : models_) UnloadModel(model);
-    models_.clear();
-    for (Texture2D texture : textures_) if (texture.id != 0U) UnloadTexture(texture);
-    textures_.clear();
+    for (PartRuntime& part : parts_) {
+        UnloadModel(part.model);
+        if (part.texture.id != 0U) UnloadTexture(part.texture);
+    }
+    parts_.clear();
+    skeleton_ = {};
     ready_ = false;
+    animated_ = false;
     sourceHeight_ = 0.0F;
+    centerX_ = 0.0F;
+    centerZ_ = 0.0F;
+    minimumY_ = 0.0F;
 }
 
 void N3CharacterModel::draw(Vector3 worldPosition, float targetHeight, Color tint) const {
     if (!ready_ || sourceHeight_ <= 0.0F) return;
     const float scale = targetHeight / sourceHeight_;
-    for (const Model& model : models_) DrawModel(model, worldPosition, scale, tint);
+    for (const PartRuntime& part : parts_) DrawModel(part.model, worldPosition, scale, tint);
 }
 
 } // namespace korework::client
