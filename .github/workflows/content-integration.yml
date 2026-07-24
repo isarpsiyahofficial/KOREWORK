@@ -1,30 +1,23 @@
-name: Fire Drake Content Integration
+name: Content Runtime Validation
 
 on:
   push:
     branches:
       - integration/**
-  pull_request:
-    paths:
-      - 'src/content/**'
-      - 'tools/**'
-      - 'tests/smd_map_smoke.cpp'
-      - 'upstream/ko-assets'
-      - '.gitmodules'
-      - 'CMakeLists.txt'
-      - '.github/workflows/content-integration.yml'
+    paths-ignore:
+      - '.validation/**'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   CMAKE_BUILD_PARALLEL_LEVEL: 2
 
 jobs:
-  validate-content-linux:
+  validate-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout KOREWORK
         uses: actions/checkout@v4
@@ -32,7 +25,7 @@ jobs:
           submodules: false
           fetch-depth: 1
 
-      - name: Fetch pinned KO assets only
+      - name: Fetch pinned open KO assets
         shell: bash
         run: |
           git submodule sync -- upstream/ko-assets
@@ -48,24 +41,111 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
 
-      - name: Build parser and tests
-        run: cmake --build build --target korework_content_probe korework_smd_smoke
+      - name: Build full offline client and probes
+        run: cmake --build build --target korework korework_content_probe korework_runtime_smoke korework_smd_smoke
 
-      - name: Run synthetic SMD test
-        run: ctest --test-dir build -R fire-drake-smd-smoke --output-on-failure
+      - name: Run offline tests
+        run: ctest --test-dir build --output-on-failure
 
-      - name: Probe real KO asset tree and map
+      - name: Probe real KO map, model and texture chains
         shell: bash
         run: |
-          build/bin/korework_content_probe upstream/ko-assets | tee ko-content-report.txt
-          grep -q 'Runtime minimum: yes' ko-content-report.txt
-          grep -Eq 'SMD maps: [1-9][0-9]*' ko-content-report.txt
-          grep -Eq 'Characters: [1-9][0-9]*' ko-content-report.txt
-          grep -Eq 'Animations: [1-9][0-9]*' ko-content-report.txt
-          grep -Eq 'Collision main cells: [1-9][0-9]*' ko-content-report.txt
+          build/bin/korework_content_probe upstream/ko-assets | tee ko-content-linux.txt
+          for pattern in \
+            'Runtime minimum: yes' \
+            'SMD maps: [1-9][0-9]*' \
+            'Collision main cells: [1-9][0-9]*' \
+            'Character parts: [1-9][0-9]*' \
+            'Populated skin LODs: [1-9][0-9]*' \
+            'Skin vertices: [1-9][0-9]*' \
+            'Skin faces: [1-9][0-9]*' \
+            'Texture dimensions: [1-9][0-9]* x [1-9][0-9]*' \
+            'Texture RGBA bytes: [1-9][0-9]*'; do
+            grep -Eq "$pattern" ko-content-linux.txt
+          done
 
-      - name: Upload integration report
+      - name: Upload Linux report
         uses: actions/upload-artifact@v4
         with:
-          name: fire-drake-content-report
-          path: ko-content-report.txt
+          name: ko-content-linux
+          path: ko-content-linux.txt
+
+  validate-windows:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - name: Checkout KOREWORK
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 1
+
+      - name: Fetch pinned open KO assets
+        shell: bash
+        run: |
+          git submodule sync -- upstream/ko-assets
+          git submodule update --init --depth 1 upstream/ko-assets
+          test -d upstream/ko-assets/game
+          test -d upstream/ko-assets/server
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON
+
+      - name: Build full offline client and probes
+        shell: pwsh
+        run: cmake --build build --config Release --parallel 2 --target korework korework_content_probe korework_runtime_smoke korework_smd_smoke
+
+      - name: Run offline tests
+        shell: pwsh
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Probe real KO map, model and texture chains
+        shell: pwsh
+        run: |
+          & build/bin/Release/korework_content_probe.exe upstream/ko-assets | Tee-Object -FilePath ko-content-windows.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $report = Get-Content ko-content-windows.txt -Raw
+          foreach ($pattern in @('Runtime minimum: yes', 'SMD maps: [1-9][0-9]*', 'Collision main cells: [1-9][0-9]*', 'Character parts: [1-9][0-9]*', 'Populated skin LODs: [1-9][0-9]*', 'Skin vertices: [1-9][0-9]*', 'Skin faces: [1-9][0-9]*', 'Texture dimensions: [1-9][0-9]* x [1-9][0-9]*', 'Texture RGBA bytes: [1-9][0-9]*')) {
+            if ($report -notmatch $pattern) { throw "Missing validation pattern: $pattern" }
+          }
+
+      - name: Upload Windows report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ko-content-windows
+          path: ko-content-windows.txt
+
+  record-success:
+    needs:
+      - validate-linux
+      - validate-windows
+    runs-on: ubuntu-latest
+    if: ${{ success() && github.event_name == 'push' }}
+    steps:
+      - name: Checkout validated branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Record validated commit
+        shell: bash
+        run: |
+          mkdir -p .validation
+          cat > .validation/content-runtime.txt <<EOF
+          status=passed
+          validated_commit=${GITHUB_SHA}
+          branch=${GITHUB_REF_NAME}
+          linux=passed
+          windows=passed
+          real_smd_parser=passed
+          real_n3_character_chain=passed
+          real_ntf_texture_decode=passed
+          generated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add .validation/content-runtime.txt
+          git commit -m "Record content runtime validation [skip ci]"
+          git push origin HEAD:${GITHUB_REF_NAME}
