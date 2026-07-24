@@ -1,9 +1,11 @@
 #include "content/asset_catalog.hpp"
 #include "content/ko_asset_resolver.hpp"
 #include "content/n3_character.hpp"
+#include "content/n3_skeleton.hpp"
 #include "content/n3_texture.hpp"
 #include "content/smd_map.hpp"
 
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -53,31 +55,73 @@ int main(int argc, char** argv) {
 
         const korework::content::N3CharacterLoader characterLoader(resolver);
         const auto character = characterLoader.load(*characterPath);
-        std::size_t populatedLods = 0;
-        std::size_t totalVertices = 0;
-        std::size_t totalFaces = 0;
-        for (const auto& part : character.parts) {
-            for (const auto& lod : part.lods) {
-                if (!lod.bindPositions.empty()) {
-                    ++populatedLods;
-                    totalVertices += lod.bindPositions.size();
-                    totalFaces += lod.faceIndices.size() / 3U;
+        if (character.jointPath.empty()) {
+            std::cerr << "N3 character has no joint reference.\n";
+            return 6;
+        }
+        const auto skeleton = korework::content::N3Skeleton::load(character.jointPath);
+        if (skeleton.joints().empty()) {
+            std::cerr << "N3 skeleton contains no joints.\n";
+            return 7;
+        }
+        const auto skinMatrices = skeleton.skinMatrices(1.0F);
+        if (skinMatrices.size() != skeleton.joints().size()) {
+            std::cerr << "N3 skeleton skin matrix count is inconsistent.\n";
+            return 8;
+        }
+        for (const auto& matrix : skinMatrices) {
+            for (const float value : matrix.value) {
+                if (!std::isfinite(value)) {
+                    std::cerr << "N3 skeleton produced a non-finite skin matrix.\n";
+                    return 9;
                 }
             }
         }
-        if (totalVertices == 0 || totalFaces == 0) {
-            std::cerr << "N3 character has no populated bind-pose skin geometry.\n";
-            return 6;
+
+        std::size_t populatedLods = 0;
+        std::size_t totalVertices = 0;
+        std::size_t totalFaces = 0;
+        std::size_t weightedVertices = 0;
+        std::size_t totalInfluences = 0;
+        for (const auto& part : character.parts) {
+            for (const auto& lod : part.lods) {
+                if (lod.bindPositions.empty()) continue;
+                ++populatedLods;
+                totalVertices += lod.bindPositions.size();
+                totalFaces += lod.faceIndices.size() / 3U;
+                if (lod.influences.size() != lod.bindPositions.size()) {
+                    std::cerr << "N3 skin influence count does not match bind-pose vertices.\n";
+                    return 10;
+                }
+                for (const auto& influence : lod.influences) {
+                    if (influence.jointIndices.size() != influence.weights.size()) {
+                        std::cerr << "N3 joint index and weight counts do not match.\n";
+                        return 11;
+                    }
+                    if (!influence.jointIndices.empty()) ++weightedVertices;
+                    totalInfluences += influence.jointIndices.size();
+                    for (const std::int32_t jointIndex : influence.jointIndices) {
+                        if (jointIndex < 0 || static_cast<std::size_t>(jointIndex) >= skeleton.joints().size()) {
+                            std::cerr << "N3 skin contains a joint index outside the skeleton.\n";
+                            return 12;
+                        }
+                    }
+                }
+            }
+        }
+        if (totalVertices == 0 || totalFaces == 0 || weightedVertices == 0) {
+            std::cerr << "N3 character has no populated weighted skin geometry.\n";
+            return 13;
         }
         if (character.parts.front().texturePath.empty()) {
             std::cerr << "N3 character part has no texture reference.\n";
-            return 7;
+            return 14;
         }
 
         const auto texture = korework::content::N3TextureLoader::load(character.parts.front().texturePath);
         if (texture.rgba.size() != static_cast<std::size_t>(texture.width) * static_cast<std::size_t>(texture.height) * 4U) {
             std::cerr << "Decoded Noah texture size is inconsistent.\n";
-            return 8;
+            return 15;
         }
 
         std::cout << "Selected N3 character: " << characterPath->generic_string() << '\n'
@@ -87,6 +131,10 @@ int main(int argc, char** argv) {
                   << "Populated skin LODs: " << populatedLods << '\n'
                   << "Skin vertices: " << totalVertices << '\n'
                   << "Skin faces: " << totalFaces << '\n'
+                  << "Weighted vertices: " << weightedVertices << '\n'
+                  << "Total bone influences: " << totalInfluences << '\n'
+                  << "Skeleton joints: " << skeleton.joints().size() << '\n'
+                  << "Skin matrices: " << skinMatrices.size() << '\n'
                   << "Joint: " << character.jointPath.generic_string() << '\n'
                   << "Animation: " << character.animationPath.generic_string() << '\n'
                   << "Texture: " << character.parts.front().texturePath.generic_string() << '\n'
