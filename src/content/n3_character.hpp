@@ -14,6 +14,11 @@ struct N3Vector2 { float u = 0.0F; float v = 0.0F; };
 struct N3Vector3 { float x = 0.0F; float y = 0.0F; float z = 0.0F; };
 struct N3Quaternion { float x = 0.0F; float y = 0.0F; float z = 0.0F; float w = 1.0F; };
 
+struct N3SkinInfluence {
+    std::vector<std::int32_t> jointIndices;
+    std::vector<float> weights;
+};
+
 struct N3SkinLod {
     std::string name;
     std::vector<N3Vector3> positions;
@@ -22,6 +27,7 @@ struct N3SkinLod {
     std::vector<std::uint16_t> faceIndices;
     std::vector<N3Vector2> uvs;
     std::vector<std::uint16_t> uvIndices;
+    std::vector<N3SkinInfluence> influences;
 };
 
 struct N3CharacterPart {
