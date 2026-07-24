@@ -22,7 +22,7 @@ public:
     bool load(const content::N3Character& character, std::size_t preferredLod = 0);
     bool updateAnimation(float frame) noexcept;
     void unload() noexcept;
-    void draw(Vector3 worldPosition, float targetHeight, Color tint = WHITE);
+    void draw(Vector3 worldPosition, float targetHeight, Color tint = WHITE) const;
 
     [[nodiscard]] bool ready() const noexcept { return ready_; }
     [[nodiscard]] bool animated() const noexcept { return animated_; }
@@ -54,7 +54,6 @@ private:
     float centerX_ = 0.0F;
     float centerZ_ = 0.0F;
     float minimumY_ = 0.0F;
-    float lastAnimationFrame_ = -1.0F;
     std::string error_;
 };
 
