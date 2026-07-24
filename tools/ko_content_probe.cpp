@@ -1,6 +1,7 @@
 #include "content/asset_catalog.hpp"
 #include "content/ko_asset_resolver.hpp"
 #include "content/n3_character.hpp"
+#include "content/n3_texture.hpp"
 #include "content/smd_map.hpp"
 
 #include <filesystem>
@@ -25,7 +26,6 @@ int main(int argc, char** argv) {
         const std::filesystem::path selectedMap = argc > 2
             ? std::filesystem::path(argv[2])
             : assetRoot / catalog.serverMaps.front();
-
         korework::content::SmdMap map;
         if (!map.load(selectedMap)) {
             std::cerr << "SMD parse failed for " << selectedMap << ": " << map.error() << '\n';
@@ -45,9 +45,7 @@ int main(int argc, char** argv) {
 
         const korework::content::KoAssetResolver resolver(assetRoot / "game");
         auto characterPath = resolver.findFilename("mob_deruvisy.n3chr");
-        if (!characterPath.has_value() && !catalog.characterFiles.empty()) {
-            characterPath = assetRoot / catalog.characterFiles.front();
-        }
+        if (!characterPath.has_value() && !catalog.characterFiles.empty()) characterPath = assetRoot / catalog.characterFiles.front();
         if (!characterPath.has_value()) {
             std::cerr << "No N3 character root was discovered.\n";
             return 5;
@@ -60,16 +58,26 @@ int main(int argc, char** argv) {
         std::size_t totalFaces = 0;
         for (const auto& part : character.parts) {
             for (const auto& lod : part.lods) {
-                if (!lod.positions.empty()) {
+                if (!lod.bindPositions.empty()) {
                     ++populatedLods;
-                    totalVertices += lod.positions.size();
+                    totalVertices += lod.bindPositions.size();
                     totalFaces += lod.faceIndices.size() / 3U;
                 }
             }
         }
         if (totalVertices == 0 || totalFaces == 0) {
-            std::cerr << "N3 character has no populated skin geometry.\n";
+            std::cerr << "N3 character has no populated bind-pose skin geometry.\n";
             return 6;
+        }
+        if (character.parts.front().texturePath.empty()) {
+            std::cerr << "N3 character part has no texture reference.\n";
+            return 7;
+        }
+
+        const auto texture = korework::content::N3TextureLoader::load(character.parts.front().texturePath);
+        if (texture.rgba.size() != static_cast<std::size_t>(texture.width) * static_cast<std::size_t>(texture.height) * 4U) {
+            std::cerr << "Decoded Noah texture size is inconsistent.\n";
+            return 8;
         }
 
         std::cout << "Selected N3 character: " << characterPath->generic_string() << '\n'
@@ -80,7 +88,11 @@ int main(int argc, char** argv) {
                   << "Skin vertices: " << totalVertices << '\n'
                   << "Skin faces: " << totalFaces << '\n'
                   << "Joint: " << character.jointPath.generic_string() << '\n'
-                  << "Animation: " << character.animationPath.generic_string() << '\n';
+                  << "Animation: " << character.animationPath.generic_string() << '\n'
+                  << "Texture: " << character.parts.front().texturePath.generic_string() << '\n'
+                  << "Texture dimensions: " << texture.width << " x " << texture.height << '\n'
+                  << "Texture format: " << texture.format << '\n'
+                  << "Texture RGBA bytes: " << texture.rgba.size() << '\n';
         return 0;
     } catch (const std::exception& exception) {
         std::cerr << "KO content probe failed: " << exception.what() << '\n';
