@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(KOREWORKOffline VERSION 0.1.0 LANGUAGES CXX)
+project(KOREWORKOffline VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,10 +18,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(raylib)
 
+add_library(korework_content STATIC
+    src/content/asset_catalog.cpp
+    src/content/smd_map.cpp
+)
+target_include_directories(korework_content PUBLIC src)
+
 add_library(korework_runtime STATIC
     src/offline_runtime.cpp
 )
 target_include_directories(korework_runtime PUBLIC src)
+target_link_libraries(korework_runtime PUBLIC korework_content)
 target_compile_definitions(korework_runtime PUBLIC KOREWORK_OFFLINE_ONLY=1)
 
 add_executable(korework
@@ -31,16 +38,26 @@ target_include_directories(korework PRIVATE src)
 target_link_libraries(korework PRIVATE korework_runtime raylib)
 target_compile_definitions(korework PRIVATE KOREWORK_OFFLINE_ONLY=1)
 
+add_executable(korework_content_probe tools/ko_content_probe.cpp)
+target_link_libraries(korework_content_probe PRIVATE korework_content)
+
 if(MSVC)
+    target_compile_options(korework_content PRIVATE /W4 /permissive-)
     target_compile_options(korework_runtime PRIVATE /W4 /permissive-)
     target_compile_options(korework PRIVATE /W4 /permissive-)
+    target_compile_options(korework_content_probe PRIVATE /W4 /permissive-)
 else()
+    target_compile_options(korework_content PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_runtime PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(korework_content_probe PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 set_target_properties(korework PROPERTIES
     OUTPUT_NAME "KOREWORK"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+set_target_properties(korework_content_probe PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
@@ -49,6 +66,10 @@ if(BUILD_TESTING)
     add_executable(korework_runtime_smoke tests/runtime_smoke.cpp)
     target_link_libraries(korework_runtime_smoke PRIVATE korework_runtime)
     add_test(NAME offline-runtime-smoke COMMAND korework_runtime_smoke)
+
+    add_executable(korework_smd_smoke tests/smd_map_smoke.cpp)
+    target_link_libraries(korework_smd_smoke PRIVATE korework_content)
+    add_test(NAME fire-drake-smd-smoke COMMAND korework_smd_smoke)
 endif()
 
 install(TARGETS korework RUNTIME DESTINATION .)
