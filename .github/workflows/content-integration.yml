@@ -42,12 +42,12 @@ jobs:
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
 
       - name: Build full offline client and probes
-        run: cmake --build build --target korework korework_content_probe korework_runtime_smoke korework_smd_smoke korework_texture_smoke korework_skeleton_smoke
+        run: cmake --build build --target korework korework_content_probe korework_runtime_smoke korework_smd_smoke korework_texture_smoke korework_skeleton_smoke korework_animation_smoke
 
       - name: Run offline tests
         run: ctest --test-dir build --output-on-failure
 
-      - name: Probe real KO map, model, skeleton and texture chains
+      - name: Probe real KO map, model, skeleton, animation and texture chains
         shell: bash
         run: |
           build/bin/korework_content_probe upstream/ko-assets | tee ko-content-linux.txt
@@ -62,6 +62,10 @@ jobs:
             'Weighted vertices: [1-9][0-9]*' \
             'Skeleton joints: [1-9][0-9]*' \
             'Skin matrices: [1-9][0-9]*' \
+            'Animation clips: [1-9][0-9]*' \
+            'Idle clip: .+' \
+            'Move clip: .+' \
+            'Attack clip: .+' \
             'Texture dimensions: [1-9][0-9]* x [1-9][0-9]*' \
             'Texture RGBA bytes: [1-9][0-9]*'; do
             grep -Eq "$pattern" ko-content-linux.txt
@@ -99,19 +103,19 @@ jobs:
 
       - name: Build full offline client and probes
         shell: pwsh
-        run: cmake --build build --config Release --parallel 2 --target korework korework_content_probe korework_runtime_smoke korework_smd_smoke korework_texture_smoke korework_skeleton_smoke
+        run: cmake --build build --config Release --parallel 2 --target korework korework_content_probe korework_runtime_smoke korework_smd_smoke korework_texture_smoke korework_skeleton_smoke korework_animation_smoke
 
       - name: Run offline tests
         shell: pwsh
         run: ctest --test-dir build -C Release --output-on-failure
 
-      - name: Probe real KO map, model, skeleton and texture chains
+      - name: Probe real KO map, model, skeleton, animation and texture chains
         shell: pwsh
         run: |
           & build/bin/Release/korework_content_probe.exe upstream/ko-assets | Tee-Object -FilePath ko-content-windows.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $report = Get-Content ko-content-windows.txt -Raw
-          foreach ($pattern in @('Runtime minimum: yes', 'SMD maps: [1-9][0-9]*', 'Collision main cells: [1-9][0-9]*', 'Character parts: [1-9][0-9]*', 'Populated skin LODs: [1-9][0-9]*', 'Skin vertices: [1-9][0-9]*', 'Skin faces: [1-9][0-9]*', 'Weighted vertices: [1-9][0-9]*', 'Skeleton joints: [1-9][0-9]*', 'Skin matrices: [1-9][0-9]*', 'Texture dimensions: [1-9][0-9]* x [1-9][0-9]*', 'Texture RGBA bytes: [1-9][0-9]*')) {
+          foreach ($pattern in @('Runtime minimum: yes', 'SMD maps: [1-9][0-9]*', 'Collision main cells: [1-9][0-9]*', 'Character parts: [1-9][0-9]*', 'Populated skin LODs: [1-9][0-9]*', 'Skin vertices: [1-9][0-9]*', 'Skin faces: [1-9][0-9]*', 'Weighted vertices: [1-9][0-9]*', 'Skeleton joints: [1-9][0-9]*', 'Skin matrices: [1-9][0-9]*', 'Animation clips: [1-9][0-9]*', 'Idle clip: .+', 'Move clip: .+', 'Attack clip: .+', 'Texture dimensions: [1-9][0-9]* x [1-9][0-9]*', 'Texture RGBA bytes: [1-9][0-9]*')) {
             if ($report -notmatch $pattern) { throw "Missing validation pattern: $pattern" }
           }
 
@@ -146,6 +150,8 @@ jobs:
           if [[ "$LINUX_RESULT" == "success" && "$WINDOWS_RESULT" == "success" ]]; then STATUS=passed; else STATUS=failed; fi
           cat > .validation/content-runtime.txt <<EOF
           status=${STATUS}
+          run_id=${GITHUB_RUN_ID}
+          run_attempt=${GITHUB_RUN_ATTEMPT}
           validated_commit=${GITHUB_SHA}
           branch=${GITHUB_REF_NAME}
           linux=${LINUX_RESULT}
@@ -153,6 +159,7 @@ jobs:
           real_smd_parser=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
           real_n3_character_chain=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
           real_n3_skeleton=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
+          real_n3_animation_metadata=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
           real_ntf_texture_decode=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
           generated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
