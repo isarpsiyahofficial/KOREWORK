@@ -17,6 +17,7 @@ struct N3Quaternion { float x = 0.0F; float y = 0.0F; float z = 0.0F; float w = 
 struct N3SkinLod {
     std::string name;
     std::vector<N3Vector3> positions;
+    std::vector<N3Vector3> bindPositions;
     std::vector<N3Vector3> normals;
     std::vector<std::uint16_t> faceIndices;
     std::vector<N3Vector2> uvs;
