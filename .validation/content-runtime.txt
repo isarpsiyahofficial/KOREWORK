@@ -1,0 +1,14 @@
+status=failed
+run_id=30123799066
+run_attempt=1
+validated_commit=96d80146622ed18553d182055cb3943e5a10e3bb
+branch=integration/equipment-validation-v1
+linux=failure
+windows=failure
+real_smd_parser=unverified
+real_n3_character_chain=unverified
+real_n3_skeleton=unverified
+real_n3_animation_metadata=unverified
+real_n3_equipment_chain=unverified
+real_ntf_texture_decode=unverified
+generated_utc=2026-07-24T20:24:15Z
