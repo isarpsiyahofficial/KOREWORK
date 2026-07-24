@@ -1,5 +1,6 @@
 #include "content/asset_catalog.hpp"
 #include "content/ko_asset_resolver.hpp"
+#include "content/n3_animation.hpp"
 #include "content/n3_character.hpp"
 #include "content/n3_skeleton.hpp"
 #include "content/n3_texture.hpp"
@@ -55,10 +56,11 @@ int main(int argc, char** argv) {
 
         const korework::content::N3CharacterLoader characterLoader(resolver);
         const auto character = characterLoader.load(*characterPath);
-        if (character.jointPath.empty()) {
-            std::cerr << "N3 character has no joint reference.\n";
+        if (character.jointPath.empty() || character.animationPath.empty()) {
+            std::cerr << "N3 character is missing its joint or animation reference.\n";
             return 6;
         }
+
         const auto skeleton = korework::content::N3Skeleton::load(character.jointPath);
         if (skeleton.joints().empty()) {
             std::cerr << "N3 skeleton contains no joints.\n";
@@ -78,6 +80,15 @@ int main(int argc, char** argv) {
             }
         }
 
+        const auto animations = korework::content::N3AnimationSet::load(character.animationPath);
+        const auto* idleClip = animations.preferredIdle();
+        const auto* moveClip = animations.preferredMove();
+        const auto* attackClip = animations.preferredAttack();
+        if (animations.clips().empty() || idleClip == nullptr || moveClip == nullptr || attackClip == nullptr) {
+            std::cerr << "N3 animation metadata contains no usable clips.\n";
+            return 10;
+        }
+
         std::size_t populatedLods = 0;
         std::size_t totalVertices = 0;
         std::size_t totalFaces = 0;
@@ -91,19 +102,19 @@ int main(int argc, char** argv) {
                 totalFaces += lod.faceIndices.size() / 3U;
                 if (lod.influences.size() != lod.bindPositions.size()) {
                     std::cerr << "N3 skin influence count does not match bind-pose vertices.\n";
-                    return 10;
+                    return 11;
                 }
                 for (const auto& influence : lod.influences) {
                     if (influence.jointIndices.size() != influence.weights.size()) {
                         std::cerr << "N3 joint index and weight counts do not match.\n";
-                        return 11;
+                        return 12;
                     }
                     if (!influence.jointIndices.empty()) ++weightedVertices;
                     totalInfluences += influence.jointIndices.size();
                     for (const std::int32_t jointIndex : influence.jointIndices) {
                         if (jointIndex < 0 || static_cast<std::size_t>(jointIndex) >= skeleton.joints().size()) {
                             std::cerr << "N3 skin contains a joint index outside the skeleton.\n";
-                            return 12;
+                            return 13;
                         }
                     }
                 }
@@ -111,17 +122,17 @@ int main(int argc, char** argv) {
         }
         if (totalVertices == 0 || totalFaces == 0 || weightedVertices == 0) {
             std::cerr << "N3 character has no populated weighted skin geometry.\n";
-            return 13;
+            return 14;
         }
         if (character.parts.front().texturePath.empty()) {
             std::cerr << "N3 character part has no texture reference.\n";
-            return 14;
+            return 15;
         }
 
         const auto texture = korework::content::N3TextureLoader::load(character.parts.front().texturePath);
         if (texture.rgba.size() != static_cast<std::size_t>(texture.width) * static_cast<std::size_t>(texture.height) * 4U) {
             std::cerr << "Decoded Noah texture size is inconsistent.\n";
-            return 15;
+            return 16;
         }
 
         std::cout << "Selected N3 character: " << characterPath->generic_string() << '\n'
@@ -134,7 +145,12 @@ int main(int argc, char** argv) {
                   << "Weighted vertices: " << weightedVertices << '\n'
                   << "Total bone influences: " << totalInfluences << '\n'
                   << "Skeleton joints: " << skeleton.joints().size() << '\n'
+                  << "Skeleton maximum frame: " << skeleton.maximumFrame() << '\n'
                   << "Skin matrices: " << skinMatrices.size() << '\n'
+                  << "Animation clips: " << animations.clips().size() << '\n'
+                  << "Idle clip: " << idleClip->name << " [" << idleClip->frameStart << ", " << idleClip->frameEnd << "]\n"
+                  << "Move clip: " << moveClip->name << " [" << moveClip->frameStart << ", " << moveClip->frameEnd << "]\n"
+                  << "Attack clip: " << attackClip->name << " [" << attackClip->frameStart << ", " << attackClip->frameEnd << "]\n"
                   << "Joint: " << character.jointPath.generic_string() << '\n'
                   << "Animation: " << character.animationPath.generic_string() << '\n'
                   << "Texture: " << character.parts.front().texturePath.generic_string() << '\n'
