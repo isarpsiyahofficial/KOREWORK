@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(KOREWORKOffline VERSION 0.6.0 LANGUAGES CXX)
+project(KOREWORKOffline VERSION 0.7.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,6 +21,7 @@ FetchContent_MakeAvailable(raylib)
 add_library(korework_content STATIC
     src/content/asset_catalog.cpp
     src/content/ko_asset_resolver.cpp
+    src/content/n3_animation.cpp
     src/content/n3_character.cpp
     src/content/n3_skeleton.cpp
     src/content/n3_texture.cpp
@@ -84,6 +85,10 @@ if(BUILD_TESTING)
     add_executable(korework_skeleton_smoke tests/n3_skeleton_smoke.cpp)
     target_link_libraries(korework_skeleton_smoke PRIVATE korework_content)
     add_test(NAME n3-skeleton-smoke COMMAND korework_skeleton_smoke)
+
+    add_executable(korework_animation_smoke tests/n3_animation_smoke.cpp)
+    target_link_libraries(korework_animation_smoke PRIVATE korework_content)
+    add_test(NAME n3-animation-smoke COMMAND korework_animation_smoke)
 endif()
 
 install(TARGETS korework RUNTIME DESTINATION .)
