@@ -1,0 +1,13 @@
+build/
+dist/
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+CMakeUserPresets.json
+KOREWORK-Windows.zip
+KOREWORK-Linux.tar.gz
+.korework/
