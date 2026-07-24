@@ -21,7 +21,6 @@ std::string KoAssetResolver::normalized(const std::filesystem::path& path) {
 
 int KoAssetResolver::directoryPreference(const std::filesystem::path& relativePath) noexcept {
     const std::string directory = normalized(relativePath.parent_path());
-    // Item contains the self-contained monster/character records used by the open asset set.
     if (directory == "item" || directory.starts_with("item/")) return 0;
     if (directory == "chr" || directory.starts_with("chr/")) return 1;
     if (directory == "object" || directory.starts_with("object/")) return 2;
@@ -67,8 +66,8 @@ KoAssetResolver::KoAssetResolver(std::filesystem::path gameRoot) {
             const auto rightRelative = std::filesystem::relative(right, root_, rightError);
             const int leftPreference = leftError ? 100 : directoryPreference(leftRelative);
             const int rightPreference = rightError ? 100 : directoryPreference(rightRelative);
-            return std::tie(leftPreference, normalized(leftRelative))
-                < std::tie(rightPreference, normalized(rightRelative));
+            return std::tuple{leftPreference, normalized(leftRelative)}
+                < std::tuple{rightPreference, normalized(rightRelative)};
         });
     }
 }
