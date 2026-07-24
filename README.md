@@ -12,4 +12,6 @@ Knight Online Fire Drake v1453 dönemini temel alan, Windows ve Linux uyumlu off
 
 ## Upstream
 
-Fire Drake v1453 kaynağı sabitlenmiş bir Git submodule olarak `upstream/fire-drake-v1453` altında tutulacaktır.
+Fire Drake v1453 kaynağı sabitlenmiş bir Git submodule olarak `upstream/fire-drake-v1453` altında tutulmaktadır.
+
+Sabitlenen upstream commit: `0f520272ae1f11472623d62bff76fff98562e7b3`
