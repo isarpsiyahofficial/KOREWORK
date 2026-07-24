@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(KOREWORKOffline VERSION 0.5.1 LANGUAGES CXX)
+project(KOREWORKOffline VERSION 0.6.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,6 +22,7 @@ add_library(korework_content STATIC
     src/content/asset_catalog.cpp
     src/content/ko_asset_resolver.cpp
     src/content/n3_character.cpp
+    src/content/n3_skeleton.cpp
     src/content/n3_texture.cpp
     src/content/smd_map.cpp
 )
@@ -79,6 +80,10 @@ if(BUILD_TESTING)
     add_executable(korework_texture_smoke tests/n3_texture_smoke.cpp)
     target_link_libraries(korework_texture_smoke PRIVATE korework_content)
     add_test(NAME noah-texture-smoke COMMAND korework_texture_smoke)
+
+    add_executable(korework_skeleton_smoke tests/n3_skeleton_smoke.cpp)
+    target_link_libraries(korework_skeleton_smoke PRIVATE korework_content)
+    add_test(NAME n3-skeleton-smoke COMMAND korework_skeleton_smoke)
 endif()
 
 install(TARGETS korework RUNTIME DESTINATION .)
