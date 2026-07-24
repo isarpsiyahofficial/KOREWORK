@@ -1,0 +1,90 @@
+name: Offline Build
+
+on:
+  push:
+    branches:
+      - main
+      - rework/**
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ libasound2-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxcursor-dev libxinerama-dev
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test serverless runtime
+        run: ctest --test-dir build --output-on-failure -C Release
+
+      - name: Verify no bundled server/database binaries
+        shell: bash
+        run: |
+          test ! -e build/bin/GameServer
+          test ! -e build/bin/AIServer
+          test ! -e build/bin/LoginServer
+          find build/bin -maxdepth 1 -type f -printf '%f\n'
+
+      - name: Package Linux
+        run: |
+          mkdir -p dist/KOREWORK-Linux
+          cp build/bin/KOREWORK dist/KOREWORK-Linux/
+          cp README.md dist/KOREWORK-Linux/
+          tar -C dist -czf KOREWORK-Linux.tar.gz KOREWORK-Linux
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KOREWORK-Linux
+          path: KOREWORK-Linux.tar.gz
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Configure
+        run: cmake -S . -B build -A x64 -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 2
+
+      - name: Test serverless runtime
+        run: ctest --test-dir build --output-on-failure -C Release
+
+      - name: Package Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/KOREWORK-Windows | Out-Null
+          Copy-Item build/bin/Release/KOREWORK.exe dist/KOREWORK-Windows/
+          Copy-Item README.md dist/KOREWORK-Windows/
+          Compress-Archive -Path dist/KOREWORK-Windows -DestinationPath KOREWORK-Windows.zip -Force
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KOREWORK-Windows
+          path: KOREWORK-Windows.zip
