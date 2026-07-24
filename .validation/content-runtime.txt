@@ -1,0 +1,13 @@
+status=failed
+run_id=30123364516
+run_attempt=1
+validated_commit=d9675ed8e9543ecdfe76223d757c2dc93682d53f
+branch=integration/animation-validation-v1
+linux=success
+windows=failure
+real_smd_parser=unverified
+real_n3_character_chain=unverified
+real_n3_skeleton=unverified
+real_n3_animation_metadata=unverified
+real_ntf_texture_decode=unverified
+generated_utc=2026-07-24T20:17:20Z
