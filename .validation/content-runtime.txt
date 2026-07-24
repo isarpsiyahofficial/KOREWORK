@@ -1,0 +1,14 @@
+status=failed
+run_id=30123991770
+run_attempt=1
+validated_commit=78470baab091c536bf977afc272e17d3a84d9d13
+branch=integration/full-content-validation-v2
+linux=failure
+windows=failure
+real_smd_parser=unverified
+real_n3_character_chain=unverified
+real_n3_skeleton=unverified
+real_n3_animation_metadata=unverified
+real_n3_equipment_chain=unverified
+real_ntf_texture_decode=unverified
+generated_utc=2026-07-24T20:27:28Z
