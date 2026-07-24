@@ -25,9 +25,11 @@ public:
     [[nodiscard]] float sourceHeight() const noexcept { return sourceHeight_; }
     [[nodiscard]] const std::string& error() const noexcept { return error_; }
     [[nodiscard]] std::size_t partCount() const noexcept { return models_.size(); }
+    [[nodiscard]] std::size_t textureCount() const noexcept { return textures_.size(); }
 
 private:
     std::vector<Model> models_;
+    std::vector<Texture2D> textures_;
     bool ready_ = false;
     float sourceHeight_ = 0.0F;
     std::string error_;
