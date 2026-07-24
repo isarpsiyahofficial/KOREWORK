@@ -7,3 +7,8 @@
 	path = upstream/ko-assets
 	url = https://github.com/ko4life-net/ko-assets.git
 	branch = master
+
+[submodule "upstream/openko-client"]
+	path = upstream/openko-client
+	url = https://github.com/Open-KO/KnightOnline.git
+	branch = master
