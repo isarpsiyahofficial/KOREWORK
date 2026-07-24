@@ -47,7 +47,10 @@ int main(int argc, char** argv) {
                   << "Warps: " << map.warps().size() << '\n';
 
         const korework::content::KoAssetResolver resolver(assetRoot / "game");
-        auto characterPath = resolver.findFilename("mob_deruvisy.n3chr");
+        std::optional<std::filesystem::path> characterPath;
+        const std::filesystem::path preferredCharacter = assetRoot / "game" / "Item" / "mob_deruvisy.n3chr";
+        if (std::filesystem::is_regular_file(preferredCharacter)) characterPath = preferredCharacter;
+        if (!characterPath.has_value()) characterPath = resolver.findFilename("mob_deruvisy.n3chr");
         if (!characterPath.has_value() && !catalog.characterFiles.empty()) characterPath = assetRoot / catalog.characterFiles.front();
         if (!characterPath.has_value()) {
             std::cerr << "No N3 character root was discovered.\n";
