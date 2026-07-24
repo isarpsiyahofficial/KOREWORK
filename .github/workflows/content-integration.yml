@@ -1,0 +1,71 @@
+name: Fire Drake Content Integration
+
+on:
+  push:
+    branches:
+      - integration/**
+  pull_request:
+    paths:
+      - 'src/content/**'
+      - 'tools/**'
+      - 'tests/smd_map_smoke.cpp'
+      - 'upstream/ko-assets'
+      - '.gitmodules'
+      - 'CMakeLists.txt'
+      - '.github/workflows/content-integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+
+jobs:
+  validate-content-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout KOREWORK
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 1
+
+      - name: Fetch pinned KO assets only
+        shell: bash
+        run: |
+          git submodule sync -- upstream/ko-assets
+          git submodule update --init --depth 1 upstream/ko-assets
+          test -d upstream/ko-assets/game
+          test -d upstream/ko-assets/server
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ libasound2-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxcursor-dev libxinerama-dev
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+
+      - name: Build parser and tests
+        run: cmake --build build --target korework_content_probe korework_smd_smoke
+
+      - name: Run synthetic SMD test
+        run: ctest --test-dir build -R fire-drake-smd-smoke --output-on-failure
+
+      - name: Probe real KO asset tree and map
+        shell: bash
+        run: |
+          build/bin/korework_content_probe upstream/ko-assets | tee ko-content-report.txt
+          grep -q 'Runtime minimum: yes' ko-content-report.txt
+          grep -Eq 'SMD maps: [1-9][0-9]*' ko-content-report.txt
+          grep -Eq 'Characters: [1-9][0-9]*' ko-content-report.txt
+          grep -Eq 'Animations: [1-9][0-9]*' ko-content-report.txt
+          grep -Eq 'Collision main cells: [1-9][0-9]*' ko-content-report.txt
+
+      - name: Upload integration report
+        uses: actions/upload-artifact@v4
+        with:
+          name: fire-drake-content-report
+          path: ko-content-report.txt
