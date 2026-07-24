@@ -18,18 +18,24 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(raylib)
 
-add_executable(korework
-    src/main.cpp
+add_library(korework_runtime STATIC
     src/offline_runtime.cpp
 )
+target_include_directories(korework_runtime PUBLIC src)
+target_compile_definitions(korework_runtime PUBLIC KOREWORK_OFFLINE_ONLY=1)
 
+add_executable(korework
+    src/main.cpp
+)
 target_include_directories(korework PRIVATE src)
-target_link_libraries(korework PRIVATE raylib)
+target_link_libraries(korework PRIVATE korework_runtime raylib)
 target_compile_definitions(korework PRIVATE KOREWORK_OFFLINE_ONLY=1)
 
 if(MSVC)
+    target_compile_options(korework_runtime PRIVATE /W4 /permissive-)
     target_compile_options(korework PRIVATE /W4 /permissive-)
 else()
+    target_compile_options(korework_runtime PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
@@ -37,5 +43,12 @@ set_target_properties(korework PROPERTIES
     OUTPUT_NAME "KOREWORK"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(korework_runtime_smoke tests/runtime_smoke.cpp)
+    target_link_libraries(korework_runtime_smoke PRIVATE korework_runtime)
+    add_test(NAME offline-runtime-smoke COMMAND korework_runtime_smoke)
+endif()
 
 install(TARGETS korework RUNTIME DESTINATION .)
