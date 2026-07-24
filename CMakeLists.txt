@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(KOREWORKOffline VERSION 0.8.0 LANGUAGES CXX)
+project(KOREWORKOffline VERSION 0.8.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,24 +48,28 @@ target_compile_definitions(korework PRIVATE KOREWORK_OFFLINE_ONLY=1)
 
 add_executable(korework_content_probe tools/ko_content_probe.cpp)
 target_link_libraries(korework_content_probe PRIVATE korework_content)
+add_executable(korework_equipment_probe tools/ko_equipment_probe.cpp)
+target_link_libraries(korework_equipment_probe PRIVATE korework_content)
 
 if(MSVC)
     target_compile_options(korework_content PRIVATE /W4 /permissive-)
     target_compile_options(korework_runtime PRIVATE /W4 /permissive-)
     target_compile_options(korework PRIVATE /W4 /permissive-)
     target_compile_options(korework_content_probe PRIVATE /W4 /permissive-)
+    target_compile_options(korework_equipment_probe PRIVATE /W4 /permissive-)
 else()
     target_compile_options(korework_content PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_runtime PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_content_probe PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(korework_equipment_probe PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 set_target_properties(korework PROPERTIES
     OUTPUT_NAME "KOREWORK"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
-set_target_properties(korework_content_probe PROPERTIES
+set_target_properties(korework_content_probe korework_equipment_probe PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
