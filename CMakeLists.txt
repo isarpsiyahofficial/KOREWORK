@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(KOREWORKOffline VERSION 0.4.0 LANGUAGES CXX)
+project(KOREWORKOffline VERSION 0.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,6 +22,7 @@ add_library(korework_content STATIC
     src/content/asset_catalog.cpp
     src/content/ko_asset_resolver.cpp
     src/content/n3_character.cpp
+    src/content/n3_texture.cpp
     src/content/smd_map.cpp
 )
 target_include_directories(korework_content PUBLIC src)
