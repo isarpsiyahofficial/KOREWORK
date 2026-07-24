@@ -42,7 +42,7 @@ jobs:
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
 
       - name: Build full offline client and probes
-        run: cmake --build build --target korework korework_content_probe korework_runtime_smoke korework_smd_smoke korework_texture_smoke korework_skeleton_smoke korework_animation_smoke
+        run: cmake --build build --target korework korework_content_probe korework_equipment_probe korework_runtime_smoke korework_smd_smoke korework_texture_smoke korework_skeleton_smoke korework_animation_smoke korework_equipment_smoke
 
       - name: Run offline tests
         run: ctest --test-dir build --output-on-failure
@@ -50,7 +50,8 @@ jobs:
       - name: Probe real KO map, model, skeleton, animation and texture chains
         shell: bash
         run: |
-          build/bin/korework_content_probe upstream/ko-assets | tee ko-content-linux.txt
+          build/bin/korework_content_probe upstream/ko-assets 2>&1 | tee ko-content-linux.txt
+          test ${PIPESTATUS[0]} -eq 0
           for pattern in \
             'Runtime minimum: yes' \
             'SMD maps: [1-9][0-9]*' \
@@ -71,12 +72,23 @@ jobs:
             grep -Eq "$pattern" ko-content-linux.txt
           done
 
-      - name: Upload Linux report
+      - name: Probe real KO equipment chain
+        shell: bash
+        run: |
+          build/bin/korework_equipment_probe upstream/ko-assets 2>&1 | tee ko-equipment-linux.txt
+          test ${PIPESTATUS[0]} -eq 0
+          grep -Eq 'Equipment joint: [0-9]+' ko-equipment-linux.txt
+          grep -Eq 'Equipment vertices: [1-9][0-9]*' ko-equipment-linux.txt
+          grep -Eq 'Equipment faces: [1-9][0-9]*' ko-equipment-linux.txt
+
+      - name: Upload Linux reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ko-content-linux
-          path: ko-content-linux.txt
+          path: |
+            ko-content-linux.txt
+            ko-equipment-linux.txt
           if-no-files-found: ignore
 
   validate-windows:
@@ -103,7 +115,7 @@ jobs:
 
       - name: Build full offline client and probes
         shell: pwsh
-        run: cmake --build build --config Release --parallel 2 --target korework korework_content_probe korework_runtime_smoke korework_smd_smoke korework_texture_smoke korework_skeleton_smoke korework_animation_smoke
+        run: cmake --build build --config Release --parallel 2 --target korework korework_content_probe korework_equipment_probe korework_runtime_smoke korework_smd_smoke korework_texture_smoke korework_skeleton_smoke korework_animation_smoke korework_equipment_smoke
 
       - name: Run offline tests
         shell: pwsh
@@ -112,19 +124,31 @@ jobs:
       - name: Probe real KO map, model, skeleton, animation and texture chains
         shell: pwsh
         run: |
-          & build/bin/Release/korework_content_probe.exe upstream/ko-assets | Tee-Object -FilePath ko-content-windows.txt
+          & build/bin/Release/korework_content_probe.exe upstream/ko-assets 2>&1 | Tee-Object -FilePath ko-content-windows.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $report = Get-Content ko-content-windows.txt -Raw
           foreach ($pattern in @('Runtime minimum: yes', 'SMD maps: [1-9][0-9]*', 'Collision main cells: [1-9][0-9]*', 'Character parts: [1-9][0-9]*', 'Populated skin LODs: [1-9][0-9]*', 'Skin vertices: [1-9][0-9]*', 'Skin faces: [1-9][0-9]*', 'Weighted vertices: [1-9][0-9]*', 'Skeleton joints: [1-9][0-9]*', 'Skin matrices: [1-9][0-9]*', 'Animation clips: [1-9][0-9]*', 'Idle clip: .+', 'Move clip: .+', 'Attack clip: .+', 'Texture dimensions: [1-9][0-9]* x [1-9][0-9]*', 'Texture RGBA bytes: [1-9][0-9]*')) {
             if ($report -notmatch $pattern) { throw "Missing validation pattern: $pattern" }
           }
 
-      - name: Upload Windows report
+      - name: Probe real KO equipment chain
+        shell: pwsh
+        run: |
+          & build/bin/Release/korework_equipment_probe.exe upstream/ko-assets 2>&1 | Tee-Object -FilePath ko-equipment-windows.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $report = Get-Content ko-equipment-windows.txt -Raw
+          foreach ($pattern in @('Equipment joint: [0-9]+', 'Equipment vertices: [1-9][0-9]*', 'Equipment faces: [1-9][0-9]*')) {
+            if ($report -notmatch $pattern) { throw "Missing equipment pattern: $pattern" }
+          }
+
+      - name: Upload Windows reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ko-content-windows
-          path: ko-content-windows.txt
+          path: |
+            ko-content-windows.txt
+            ko-equipment-windows.txt
           if-no-files-found: ignore
 
   record-result:
@@ -160,6 +184,7 @@ jobs:
           real_n3_character_chain=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
           real_n3_skeleton=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
           real_n3_animation_metadata=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
+          real_n3_equipment_chain=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
           real_ntf_texture_decode=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
           generated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
