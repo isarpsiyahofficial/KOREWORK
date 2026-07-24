@@ -21,29 +21,19 @@ constexpr std::int32_t kMaximumUvs = 8'000'000;
 constexpr std::int32_t kMaximumBoneInfluences = 64;
 
 void requireCount(std::int32_t count, std::int32_t maximum, const char* label) {
-    if (count < 0 || count > maximum) {
-        throw std::runtime_error(std::string("Invalid ") + label + " count: " + std::to_string(count));
-    }
+    if (count < 0 || count > maximum) throw std::runtime_error(std::string("Invalid ") + label + " count: " + std::to_string(count));
 }
 
-N3Vector3 readVector3(BinaryReader& reader) {
-    return {reader.read<float>(), reader.read<float>(), reader.read<float>()};
-}
-
-N3Quaternion readQuaternion(BinaryReader& reader) {
-    return {reader.read<float>(), reader.read<float>(), reader.read<float>(), reader.read<float>()};
-}
+N3Vector3 readVector3(BinaryReader& reader) { return {reader.read<float>(), reader.read<float>(), reader.read<float>()}; }
+N3Quaternion readQuaternion(BinaryReader& reader) { return {reader.read<float>(), reader.read<float>(), reader.read<float>(), reader.read<float>()}; }
 
 void readAnimKey(BinaryReader& reader) {
     const std::int32_t count = reader.read<std::int32_t>();
     requireCount(count, kMaximumAnimKeys, "animation key");
     if (count == 0) return;
-
     const std::uint32_t type = reader.read<std::uint32_t>();
     const float samplingRate = reader.read<float>();
-    if (!std::isfinite(samplingRate) || samplingRate < 0.0F || samplingRate > 10'000.0F) {
-        throw std::runtime_error("Invalid N3 animation sampling rate");
-    }
+    if (!std::isfinite(samplingRate) || samplingRate < 0.0F || samplingRate > 10'000.0F) throw std::runtime_error("Invalid N3 animation sampling rate");
     if (type == 0U) reader.skip(static_cast<std::uint64_t>(count) * 12U);
     else if (type == 1U) reader.skip(static_cast<std::uint64_t>(count) * 16U);
     else throw std::runtime_error("Unsupported N3 animation key type: " + std::to_string(type));
@@ -58,15 +48,11 @@ void readTransform(BinaryReader& reader, N3Vector3& position, N3Quaternion& rota
     readAnimKey(reader);
 }
 
-std::filesystem::path resolveRequired(const KoAssetResolver& resolver,
-                                      const std::filesystem::path& baseFile,
-                                      const std::string& storedPath,
-                                      const char* label) {
+std::filesystem::path resolveRequired(const KoAssetResolver& resolver, const std::filesystem::path& baseFile,
+                                      const std::string& storedPath, const char* label) {
     if (storedPath.empty()) throw std::runtime_error(std::string("Missing ") + label + " path in " + baseFile.string());
     const auto resolved = resolver.resolve(baseFile, storedPath);
-    if (!resolved.has_value()) {
-        throw std::runtime_error(std::string("Unable to resolve ") + label + " '" + storedPath + "' from " + baseFile.string());
-    }
+    if (!resolved.has_value()) throw std::runtime_error(std::string("Unable to resolve ") + label + " '" + storedPath + "' from " + baseFile.string());
     return *resolved;
 }
 
@@ -88,8 +74,7 @@ N3Character N3CharacterLoader::load(const std::filesystem::path& characterPath) 
     requireCount(partCount, kMaximumParts, "character part");
     character.parts.reserve(static_cast<std::size_t>(partCount));
     for (std::int32_t index = 0; index < partCount; ++index) {
-        const auto partPath = resolveRequired(resolver_, characterPath, reader.readString(), "character part");
-        character.parts.push_back(loadPart(partPath));
+        character.parts.push_back(loadPart(resolveRequired(resolver_, characterPath, reader.readString(), "character part")));
     }
 
     const std::int32_t plugCount = reader.read<std::int32_t>();
@@ -143,8 +128,7 @@ N3CharacterPart N3CharacterLoader::loadPart(const std::filesystem::path& partPat
     return part;
 }
 
-void N3CharacterLoader::loadSkins(const std::filesystem::path& skinsPath,
-                                  std::array<N3SkinLod, 4>& lods) const {
+void N3CharacterLoader::loadSkins(const std::filesystem::path& skinsPath, std::array<N3SkinLod, 4>& lods) const {
     BinaryReader reader(skinsPath);
     (void) reader.readString();
 
@@ -161,6 +145,7 @@ void N3CharacterLoader::loadSkins(const std::filesystem::path& skinsPath,
         lod.positions.reserve(static_cast<std::size_t>(vertexCount));
         lod.bindPositions.reserve(static_cast<std::size_t>(vertexCount));
         lod.normals.reserve(static_cast<std::size_t>(vertexCount));
+        lod.influences.reserve(static_cast<std::size_t>(vertexCount));
         for (std::int32_t vertex = 0; vertex < vertexCount; ++vertex) {
             lod.positions.push_back(readVector3(reader));
             lod.normals.push_back(readVector3(reader));
@@ -168,9 +153,7 @@ void N3CharacterLoader::loadSkins(const std::filesystem::path& skinsPath,
 
         const std::size_t indexCount = static_cast<std::size_t>(faceCount) * 3U;
         lod.faceIndices = reader.readVector<std::uint16_t>(indexCount);
-        for (const std::uint16_t index : lod.faceIndices) {
-            if (index >= lod.positions.size()) throw std::runtime_error("N3 skin face index exceeds vertex count");
-        }
+        for (const std::uint16_t index : lod.faceIndices) if (index >= lod.positions.size()) throw std::runtime_error("N3 skin face index exceeds vertex count");
 
         lod.uvs.reserve(static_cast<std::size_t>(uvCount));
         for (std::int32_t uv = 0; uv < uvCount; ++uv) {
@@ -180,9 +163,7 @@ void N3CharacterLoader::loadSkins(const std::filesystem::path& skinsPath,
             lod.uvs.push_back({u, 1.0F - rawV});
         }
         lod.uvIndices = reader.readVector<std::uint16_t>(indexCount);
-        for (const std::uint16_t index : lod.uvIndices) {
-            if (index >= lod.uvs.size() && !lod.uvs.empty()) throw std::runtime_error("N3 skin UV index exceeds UV count");
-        }
+        for (const std::uint16_t index : lod.uvIndices) if (index >= lod.uvs.size() && !lod.uvs.empty()) throw std::runtime_error("N3 skin UV index exceeds UV count");
 
         for (std::int32_t vertex = 0; vertex < vertexCount; ++vertex) {
             lod.bindPositions.push_back(readVector3(reader));
@@ -190,17 +171,26 @@ void N3CharacterLoader::loadSkins(const std::filesystem::path& skinsPath,
             requireCount(influenceCount, kMaximumBoneInfluences, "bone influence");
             (void) reader.read<std::int32_t>();
             (void) reader.read<std::int32_t>();
+
+            N3SkinInfluence influence;
             if (influenceCount > 1) {
-                reader.skip(static_cast<std::uint64_t>(influenceCount) * sizeof(std::int32_t));
-                const auto weights = reader.readVector<float>(static_cast<std::size_t>(influenceCount));
-                for (const float weight : weights) {
+                influence.jointIndices = reader.readVector<std::int32_t>(static_cast<std::size_t>(influenceCount));
+                influence.weights = reader.readVector<float>(static_cast<std::size_t>(influenceCount));
+                float totalWeight = 0.0F;
+                for (const float weight : influence.weights) {
                     if (!std::isfinite(weight) || weight < -0.001F || weight > 1.001F) throw std::runtime_error("Invalid N3 skin bone weight");
+                    totalWeight += weight;
                 }
+                if (!influence.weights.empty() && (totalWeight < 0.5F || totalWeight > 1.5F)) throw std::runtime_error("Invalid N3 skin total bone weight");
             } else if (influenceCount == 1) {
-                (void) reader.read<std::int32_t>();
+                influence.jointIndices.push_back(reader.read<std::int32_t>());
+                influence.weights.push_back(1.0F);
             }
+            lod.influences.push_back(std::move(influence));
         }
-        if (lod.bindPositions.size() != lod.positions.size()) throw std::runtime_error("N3 skin bind-pose count mismatch");
+        if (lod.bindPositions.size() != lod.positions.size() || lod.influences.size() != lod.positions.size()) {
+            throw std::runtime_error("N3 skin bind-pose/influence count mismatch");
+        }
     }
 
     if (reader.remaining() != 0U) throw std::runtime_error("Unexpected trailing N3 skin bytes: " + std::to_string(reader.remaining()));
