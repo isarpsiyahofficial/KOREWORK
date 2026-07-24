@@ -1,5 +1,6 @@
 #include "content/smd_map.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
