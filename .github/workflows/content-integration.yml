@@ -42,7 +42,7 @@ jobs:
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
 
       - name: Build full offline client and probes
-        run: cmake --build build --target korework korework_content_probe korework_runtime_smoke korework_smd_smoke
+        run: cmake --build build --target korework korework_content_probe korework_runtime_smoke korework_smd_smoke korework_texture_smoke
 
       - name: Run offline tests
         run: ctest --test-dir build --output-on-failure
@@ -94,7 +94,7 @@ jobs:
 
       - name: Build full offline client and probes
         shell: pwsh
-        run: cmake --build build --config Release --parallel 2 --target korework korework_content_probe korework_runtime_smoke korework_smd_smoke
+        run: cmake --build build --config Release --parallel 2 --target korework korework_content_probe korework_runtime_smoke korework_smd_smoke korework_texture_smoke
 
       - name: Run offline tests
         shell: pwsh
