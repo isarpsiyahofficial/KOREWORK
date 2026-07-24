@@ -1,0 +1,10 @@
+status=failed
+validated_commit=80e2431462f830ad78ebff0a22c7fdb4d1587422
+branch=integration/skeleton-validation-v2
+linux=success
+windows=failure
+real_smd_parser=unverified
+real_n3_character_chain=unverified
+real_n3_skeleton=unverified
+real_ntf_texture_decode=unverified
+generated_utc=2026-07-24T20:12:18Z
