@@ -6,6 +6,7 @@
 #include "raylib.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -27,10 +28,15 @@ public:
     [[nodiscard]] bool ready() const noexcept { return ready_; }
     [[nodiscard]] bool animated() const noexcept { return animated_; }
     [[nodiscard]] float sourceHeight() const noexcept { return sourceHeight_; }
+    [[nodiscard]] float renderCenterX() const noexcept { return centerX_; }
+    [[nodiscard]] float renderCenterZ() const noexcept { return centerZ_; }
+    [[nodiscard]] float renderMinimumY() const noexcept { return minimumY_; }
     [[nodiscard]] float maximumFrame() const noexcept { return skeleton_.maximumFrame(); }
     [[nodiscard]] const std::string& error() const noexcept { return error_; }
     [[nodiscard]] std::size_t partCount() const noexcept { return parts_.size(); }
     [[nodiscard]] std::size_t textureCount() const noexcept;
+    [[nodiscard]] std::optional<content::N3Matrix4> jointWorldMatrix(std::size_t jointIndex,
+                                                                     float frame) const noexcept;
 
 private:
     struct PartRuntime {
