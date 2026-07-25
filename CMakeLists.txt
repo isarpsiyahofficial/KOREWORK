@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(KOREWORKOffline VERSION 0.9.1 LANGUAGES CXX)
+project(KOREWORKOffline VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -28,6 +28,7 @@ add_library(korework_content STATIC
     src/content/n3_texture.cpp
     src/content/smd_map.cpp
     src/data/game_data_pack.cpp
+    src/data/openko_sql_compiler.cpp
 )
 target_include_directories(korework_content PUBLIC src)
 
@@ -54,6 +55,8 @@ add_executable(korework_content_probe tools/ko_content_probe.cpp)
 target_link_libraries(korework_content_probe PRIVATE korework_content)
 add_executable(korework_equipment_probe tools/ko_equipment_probe.cpp)
 target_link_libraries(korework_equipment_probe PRIVATE korework_content)
+add_executable(korework_dataset_compiler tools/openko_dataset_compiler.cpp)
+target_link_libraries(korework_dataset_compiler PRIVATE korework_content)
 
 if(MSVC)
     target_compile_options(korework_content PRIVATE /W4 /permissive-)
@@ -61,19 +64,21 @@ if(MSVC)
     target_compile_options(korework PRIVATE /W4 /permissive-)
     target_compile_options(korework_content_probe PRIVATE /W4 /permissive-)
     target_compile_options(korework_equipment_probe PRIVATE /W4 /permissive-)
+    target_compile_options(korework_dataset_compiler PRIVATE /W4 /permissive-)
 else()
     target_compile_options(korework_content PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_runtime PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_content_probe PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_equipment_probe PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(korework_dataset_compiler PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 set_target_properties(korework PROPERTIES
     OUTPUT_NAME "KOREWORK"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
-set_target_properties(korework_content_probe korework_equipment_probe PROPERTIES
+set_target_properties(korework_content_probe korework_equipment_probe korework_dataset_compiler PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
@@ -110,6 +115,10 @@ if(BUILD_TESTING)
     add_executable(korework_animation_player_smoke tests/n3_animation_player_smoke.cpp)
     target_link_libraries(korework_animation_player_smoke PRIVATE korework_runtime)
     add_test(NAME n3-runtime-animation-player-smoke COMMAND korework_animation_player_smoke)
+
+    add_executable(korework_sql_compiler_smoke tests/openko_sql_compiler_smoke.cpp)
+    target_link_libraries(korework_sql_compiler_smoke PRIVATE korework_content)
+    add_test(NAME openko-sql-to-kopack-smoke COMMAND korework_sql_compiler_smoke)
 endif()
 
 install(TARGETS korework RUNTIME DESTINATION .)
