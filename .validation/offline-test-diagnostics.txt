@@ -1,7 +1,9 @@
-validated_commit=1061b8de7392aace589706a26bfe8ae95178d028
+validated_commit=f84ceb54e0550ca0d2b0bf90a38d07613943e046
 offline-runtime-smoke=success
 profile-equipment-upgrade-smoke=success
 quest-shop-healer-state-smoke=success
+openko-real-spawn-table-smoke=success
+openko-runtime-spawn-application-smoke=success
 fire-drake-smd-smoke=success
 noah-texture-smoke=success
 n3-skeleton-smoke=success
