@@ -3,6 +3,7 @@
 #include "data/game_data_pack.hpp"
 
 #include <array>
+#include <cctype>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
