@@ -1,7 +1,7 @@
 status=failed
-run_id=30161819221
+run_id=30161852111
 run_attempt=1
-validated_commit=6fd3f9e62683f386cd7c18bf5fbdd2ec154752bf
+validated_commit=dafcbcab187cd8256b81372b5e0ccbaa12c0704c
 branch=integration/complete-offline-fire-drake-v1
 linux=failure
 windows=failure
@@ -13,4 +13,4 @@ runtime_n3_animation_state=unverified
 real_n3_equipment_chain=unverified
 sql_free_kopack=unverified
 real_ntf_texture_decode=unverified
-generated_utc=2026-07-25T15:36:53Z
+generated_utc=2026-07-25T15:36:55Z
