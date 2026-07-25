@@ -22,7 +22,17 @@ void validateRuntime(const korework::OfflineRuntime& runtime, bool requireExtern
         assert(runtime.gameData().dropTables.size() >= 20U);
         assert(runtime.gameData().skills.size() >= 20U);
         assert(runtime.gameData().classes.size() >= 4U);
+        assert(runtime.gameData().items.size() >= 100U);
         assert(runtime.monsterTemplates().size() == runtime.gameData().monsters.size());
+
+        std::size_t namedItems = 0;
+        std::size_t equipmentItems = 0;
+        for (const auto& item : runtime.gameData().items) {
+            if (!item.name.empty() && item.name.rfind("KO Item #", 0) != 0U) ++namedItems;
+            if (item.appearanceId != 0U && item.slot < 15U) ++equipmentItems;
+        }
+        assert(namedItems >= 100U);
+        assert(equipmentItems > 0U);
     }
 }
 
@@ -49,6 +59,6 @@ int main() {
     validateRuntime(reloaded, requireExternalData);
 
     std::cout << "KOREWORK offline runtime smoke test passed"
-              << (requireExternalData ? " with generated OpenKO KOPACK\n" : " with fallback data\n");
+              << (requireExternalData ? " with generated OpenKO KOPACK and real item catalog\n" : " with fallback data\n");
     return 0;
 }
