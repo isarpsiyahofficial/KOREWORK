@@ -1,12 +1,6 @@
-#include "client/n3_animation_player.hpp"
-#include "client/n3_character_model.hpp"
-#include "client/n3_equipment_model.hpp"
+#include "client/ko_monster_visual_bank.hpp"
 #include "client/smd_terrain.hpp"
 #include "content/asset_catalog.hpp"
-#include "content/ko_asset_resolver.hpp"
-#include "content/n3_animation.hpp"
-#include "content/n3_character.hpp"
-#include "content/n3_equipment.hpp"
 #include "content/smd_map.hpp"
 #include "offline_runtime.hpp"
 
@@ -22,6 +16,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -30,16 +25,10 @@ using korework::MonsterState;
 using korework::MonsterTemplate;
 using korework::OfflineRuntime;
 using korework::Vec3;
-using korework::client::N3AnimationPlayer;
+using korework::client::KoMonsterVisualBank;
 using korework::client::N3AnimationState;
-using korework::client::N3CharacterModel;
-using korework::client::N3EquipmentModel;
 using korework::client::SmdTerrainModel;
 using korework::content::KoAssetCatalog;
-using korework::content::KoAssetResolver;
-using korework::content::N3AnimationSet;
-using korework::content::N3CharacterLoader;
-using korework::content::N3EquipmentLoader;
 using korework::content::SmdMap;
 
 float clampFloat(float value, float minimum, float maximum) {
@@ -53,17 +42,25 @@ std::string lower(std::string value) {
     return value;
 }
 
+std::filesystem::path applicationDirectory() {
+    const char* directory = GetApplicationDirectory();
+    return directory != nullptr && *directory != '\0'
+        ? std::filesystem::path(directory)
+        : std::filesystem::current_path();
+}
+
 std::optional<std::filesystem::path> locateAssetRoot() {
     std::vector<std::filesystem::path> candidates;
     if (const char* environment = std::getenv("KOREWORK_ASSET_ROOT"); environment != nullptr && *environment != '\0') {
         candidates.emplace_back(environment);
     }
-    const std::filesystem::path current = std::filesystem::current_path();
-    const std::filesystem::path application = GetApplicationDirectory();
+    const auto current = std::filesystem::current_path();
+    const auto application = applicationDirectory();
     candidates.push_back(current / "assets" / "ko");
     candidates.push_back(current / "upstream" / "ko-assets");
     candidates.push_back(application / "assets" / "ko");
     candidates.push_back(application / "upstream" / "ko-assets");
+    candidates.push_back(application.parent_path() / "assets" / "ko");
     candidates.push_back(application.parent_path() / "upstream" / "ko-assets");
 
     std::error_code error;
@@ -77,9 +74,31 @@ std::optional<std::filesystem::path> locateAssetRoot() {
     return std::nullopt;
 }
 
+std::optional<std::filesystem::path> locateDataPack() {
+    std::vector<std::filesystem::path> candidates;
+    if (const char* environment = std::getenv("KOREWORK_DATA_PACK"); environment != nullptr && *environment != '\0') {
+        candidates.emplace_back(environment);
+    }
+    const auto current = std::filesystem::current_path();
+    const auto application = applicationDirectory();
+    candidates.push_back(current / "data" / "game_data.kopack");
+    candidates.push_back(current / "game_data.kopack");
+    candidates.push_back(application / "data" / "game_data.kopack");
+    candidates.push_back(application / "game_data.kopack");
+    candidates.push_back(application.parent_path() / "data" / "game_data.kopack");
+
+    std::error_code error;
+    for (const auto& candidate : candidates) {
+        if (std::filesystem::is_regular_file(candidate, error)) return std::filesystem::weakly_canonical(candidate, error);
+        error.clear();
+    }
+    return std::nullopt;
+}
+
 std::optional<std::filesystem::path> selectMap(const KoAssetCatalog& catalog) {
-    const std::array<std::string, 5> priorities {
-        "elmorad_0516.smd", "karus_0516.smd", "free_0810.smd", "battle_0810.smd", "moradon"
+    const std::array<std::string, 7> priorities {
+        "elmorad_0516.smd", "karus_0516.smd", "free_0810.smd", "battle_0810.smd",
+        "elmorad", "karus", "moradon"
     };
     for (const auto& priority : priorities) {
         for (const auto& relative : catalog.serverMaps) {
@@ -95,31 +114,13 @@ float groundHeight(const SmdMap* map, const Vec3& position) {
     return map->heightAt(position.x + map->width() * 0.5F, position.z + map->length() * 0.5F);
 }
 
-N3AnimationState selectMonsterAnimation(const std::vector<Vec3>& previous,
-                                        const std::vector<MonsterState>& monsters) {
-    bool moving = false;
-    bool attacking = false;
-    const std::size_t count = std::min(previous.size(), monsters.size());
-    for (std::size_t index = 0; index < count; ++index) {
-        const auto& monster = monsters[index];
-        if (!monster.alive) continue;
-        if (monster.attackCooldown > 1.02F) attacking = true;
-        const float dx = monster.position.x - previous[index].x;
-        const float dz = monster.position.z - previous[index].z;
-        if (dx * dx + dz * dz > 0.000001F) moving = true;
-    }
-    if (attacking) return N3AnimationState::Attack;
-    if (moving) return N3AnimationState::Move;
-    return N3AnimationState::Idle;
-}
-
 void drawProgressBar(Rectangle rectangle, float value, float maximum, Color fill, const char* label) {
     DrawRectangleRounded(rectangle, 0.22F, 6, Color{10, 12, 16, 225});
     DrawRectangleLinesEx(rectangle, 1.0F, Color{170, 170, 180, 190});
     Rectangle filled = rectangle;
     filled.width *= maximum > 0.0F ? clampFloat(value / maximum, 0.0F, 1.0F) : 0.0F;
     DrawRectangleRounded(filled, 0.22F, 6, fill);
-    char text[96] {};
+    char text[128] {};
     std::snprintf(text, sizeof(text), "%s %d / %d", label, static_cast<int>(value), static_cast<int>(maximum));
     DrawText(text, static_cast<int>(rectangle.x + 8.0F), static_cast<int>(rectangle.y + 4.0F), 16, RAYWHITE);
 }
@@ -142,14 +143,10 @@ void drawMonster(const MonsterState& monster,
                  const MonsterTemplate& definition,
                  bool targeted,
                  float ground,
-                 const N3CharacterModel& realModel,
-                 const N3EquipmentModel& realEquipment) {
+                 KoMonsterVisualBank& visualBank) {
     const Vector3 base {monster.position.x, ground, monster.position.z};
     const float targetHeight = 1.85F * definition.scale;
-    if (realModel.ready()) {
-        realModel.draw(base, targetHeight, WHITE);
-        if (realEquipment.ready()) realEquipment.draw(base, targetHeight, realModel.sourceHeight(), WHITE);
-    } else {
+    if (!visualBank.draw(definition.modelId, base, targetHeight, WHITE)) {
         drawFallbackMonster(monster, definition, ground);
     }
 
@@ -165,8 +162,8 @@ void drawMonster(const MonsterState& monster,
 }
 
 void drawFallbackEnvironment() {
-    DrawPlane({0.0F, -0.03F, 0.0F}, {64.0F, 64.0F}, Color{77, 105, 57, 255});
-    DrawGrid(32, 2.0F);
+    DrawPlane({0.0F, -0.03F, 0.0F}, {96.0F, 96.0F}, Color{77, 105, 57, 255});
+    DrawGrid(48, 2.0F);
 }
 
 void drawSkillBar(const OfflineRuntime& runtime) {
@@ -174,7 +171,7 @@ void drawSkillBar(const OfflineRuntime& runtime) {
     const float gap = clampFloat(slot * 0.09F, 3.0F, 6.0F);
     const float totalWidth = slot * 10.0F + gap * 9.0F;
     const float startX = (static_cast<float>(GetScreenWidth()) - totalWidth) * 0.5F;
-    const float startY = static_cast<float>(GetScreenHeight()) - slot - 18.0F;
+    const float startY = static_cast<float>(GetScreenHeight()) - slot - 20.0F;
     const std::array<const char*, 10> keys {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"};
 
     DrawRectangleRounded({startX - 8.0F, startY - 8.0F, totalWidth + 16.0F, slot + 16.0F}, 0.12F, 6, Color{8, 10, 14, 215});
@@ -186,8 +183,11 @@ void drawSkillBar(const OfflineRuntime& runtime) {
         DrawRectangleRounded(rectangle, 0.16F, 5, skill.unlocked ? Color{67, 72, 88, 245} : Color{33, 34, 39, 245});
         DrawRectangleLinesEx(rectangle, 1.5F, skill.unlocked ? Color{205, 171, 75, 255} : Color{80, 80, 85, 255});
         if (skill.unlocked) {
+            const std::uint32_t hash = skill.id * 2654435761U;
             DrawCircle(static_cast<int>(x + slot * 0.5F), static_cast<int>(startY + slot * 0.52F), slot * 0.28F,
-                       index < 3 ? Color{180, 61, 41, 255} : Color{52, 112, 164, 255});
+                       Color{static_cast<unsigned char>(70U + hash % 150U),
+                             static_cast<unsigned char>(60U + (hash >> 8U) % 150U),
+                             static_cast<unsigned char>(70U + (hash >> 16U) % 150U), 255});
         }
         if (cooldown > 0.0F) {
             const float ratio = clampFloat(cooldown / std::max(0.01F, skill.cooldown), 0.0F, 1.0F);
@@ -202,7 +202,7 @@ void drawMinimap(const OfflineRuntime& runtime, const SmdMap* map) {
     const Rectangle panel {static_cast<float>(GetScreenWidth()) - size - 18.0F, 18.0F, size, size};
     DrawRectangleRounded(panel, 0.08F, 6, Color{7, 12, 13, 215});
     DrawRectangleLinesEx(panel, 2.0F, Color{160, 143, 78, 230});
-    DrawText(map != nullptr ? "REAL KO SMD" : "FALLBACK", static_cast<int>(panel.x + 10.0F), static_cast<int>(panel.y + 8.0F), 15, Color{238, 219, 153, 255});
+    DrawText(map != nullptr ? "KO SMD" : "FALLBACK", static_cast<int>(panel.x + 10.0F), static_cast<int>(panel.y + 8.0F), 15, Color{238, 219, 153, 255});
 
     const auto project = [&panel, map](const Vec3& position) {
         if (map != nullptr) {
@@ -225,10 +225,11 @@ void drawHud(const OfflineRuntime& runtime,
     const auto& player = runtime.player();
     drawProgressBar({18.0F, 18.0F, 290.0F, 26.0F}, player.hp, player.maxHp, Color{170, 32, 39, 255}, "HP");
     drawProgressBar({18.0F, 49.0F, 290.0F, 24.0F}, player.mp, player.maxMp, Color{36, 79, 171, 255}, "MP");
-    char stats[128] {};
-    std::snprintf(stats, sizeof(stats), "Level %d   EXP %d/%d   Noah %d", player.level, player.exp, player.level * 200, player.gold);
+    const int neededExperience = std::max(1000, player.level * player.level * 500);
+    char stats[160] {};
+    std::snprintf(stats, sizeof(stats), "Level %d   EXP %d/%d   Noah %d", player.level, player.exp, neededExperience, player.gold);
     DrawText(stats, 20, 79, 18, Color{246, 226, 166, 255});
-    DrawText("OFFLINE | ONE PROCESS | NO SERVER | NO SQL | NO LOCALHOST", 20, 105, 16, Color{104, 230, 159, 255});
+    DrawText("OFFLINE | TEK PROCESS | SUNUCU YOK | SQL YOK | LOCALHOST YOK", 20, 105, 16, Color{104, 230, 159, 255});
     DrawText(status.c_str(), 20, 129, 15, map != nullptr ? Color{255, 220, 122, 255} : Color{255, 130, 110, 255});
 
     if (target.has_value()) {
@@ -241,7 +242,7 @@ void drawHud(const OfflineRuntime& runtime,
     }
 
     int y = GetScreenHeight() - 245;
-    DrawRectangleRounded({12.0F, static_cast<float>(y - 8), 510.0F, 150.0F}, 0.06F, 4, Color{5, 7, 10, 170});
+    DrawRectangleRounded({12.0F, static_cast<float>(y - 8), 520.0F, 150.0F}, 0.06F, 4, Color{5, 7, 10, 170});
     int row = 0;
     for (const auto& line : runtime.log()) {
         DrawText(line.c_str(), 18, y + row * 18, 16, row == 0 ? Color{255, 222, 139, 255} : Color{216, 219, 224, 235});
@@ -249,8 +250,8 @@ void drawHud(const OfflineRuntime& runtime,
     }
 
     if (inventoryOpen) {
-        const float panelWidth = 340.0F;
-        const float panelHeight = 420.0F;
+        const float panelWidth = clampFloat(static_cast<float>(GetScreenWidth()) * 0.26F, 320.0F, 440.0F);
+        const float panelHeight = clampFloat(static_cast<float>(GetScreenHeight()) * 0.55F, 360.0F, 580.0F);
         const float x = static_cast<float>(GetScreenWidth()) - panelWidth - 24.0F;
         const float panelY = (static_cast<float>(GetScreenHeight()) - panelHeight) * 0.5F;
         DrawRectangleRounded({x, panelY, panelWidth, panelHeight}, 0.05F, 6, Color{9, 12, 17, 235});
@@ -258,16 +259,26 @@ void drawHud(const OfflineRuntime& runtime,
         DrawText("INVENTORY", static_cast<int>(x + 18.0F), static_cast<int>(panelY + 16.0F), 24, Color{243, 222, 156, 255});
         int itemY = static_cast<int>(panelY + 62.0F);
         for (const auto& item : runtime.inventory()) {
-            char itemText[160] {};
+            char itemText[200] {};
             std::snprintf(itemText, sizeof(itemText), "%s x%d", item.name.c_str(), item.count);
             DrawText(itemText, static_cast<int>(x + 24.0F), itemY, 18, RAYWHITE);
-            itemY += 32;
+            itemY += 30;
+            if (itemY > panelY + panelHeight - 28.0F) break;
         }
     }
 
     drawSkillBar(runtime);
     drawMinimap(runtime, map);
     DrawText("WASD Hareket | Sag tik Kamera | 1-0 Skill | I Envanter | F5 Kaydet", 18, GetScreenHeight() - 18, 14, LIGHTGRAY);
+}
+
+int statePriority(N3AnimationState state) {
+    switch (state) {
+        case N3AnimationState::Attack: return 3;
+        case N3AnimationState::Move: return 2;
+        case N3AnimationState::Idle: return 1;
+    }
+    return 0;
 }
 
 } // namespace
@@ -278,79 +289,40 @@ int main() {
     SetWindowMinSize(960, 540);
     SetTargetFPS(60);
 
+    OfflineRuntime runtime;
+    const auto dataPack = locateDataPack();
+    if (dataPack.has_value()) runtime.initialize(*dataPack);
+    else runtime.initialize();
+
     SmdMap worldMap;
     SmdTerrainModel terrain;
-    N3CharacterModel monsterModel;
-    N3EquipmentModel monsterEquipment;
-    N3AnimationPlayer monsterAnimation;
-    std::string status = "KO asset set bulunamadi; fallback kullaniliyor.";
+    KoMonsterVisualBank monsterVisuals;
+    std::string status = runtime.usingGameData() ? "KOPACK V2 OK" : "KOPACK FALLBACK";
 
     if (const auto assetRoot = locateAssetRoot(); assetRoot.has_value()) {
         try {
             const auto catalog = KoAssetCatalog::scan(*assetRoot);
             const auto mapPath = selectMap(catalog);
             const bool mapReady = mapPath.has_value() && worldMap.load(*mapPath) && terrain.load(worldMap);
+            const bool looksReady = monsterVisuals.initialize(*assetRoot);
+            std::vector<std::uint32_t> modelIds;
+            modelIds.reserve(runtime.monsterTemplates().size());
+            for (const auto& definition : runtime.monsterTemplates()) modelIds.push_back(definition.modelId);
+            if (looksReady) monsterVisuals.preload(modelIds, 32U);
 
-            const KoAssetResolver resolver(*assetRoot / "game");
-            const auto characterPath = resolver.findFilename("mob_deruvisy.n3chr");
-            bool modelReady = false;
-            bool animationReady = false;
-            bool equipmentReady = false;
-            std::string equipmentError;
-            if (characterPath.has_value()) {
-                const N3CharacterLoader characterLoader(resolver);
-                const auto character = characterLoader.load(*characterPath);
-                modelReady = monsterModel.load(character);
-                if (modelReady && !character.animationPath.empty()) {
-                    animationReady = monsterAnimation.configure(N3AnimationSet::load(character.animationPath));
-                }
-
-                if (modelReady && !character.plugs.empty()) {
-                    const N3EquipmentLoader equipmentLoader(resolver);
-                    const float initialFrame = monsterAnimation.ready() ? monsterAnimation.frame() : 0.0F;
-                    for (const auto& plugPath : character.plugs) {
-                        try {
-                            const auto plug = equipmentLoader.load(plugPath);
-                            const auto joint = monsterModel.jointWorldMatrix(static_cast<std::size_t>(plug.jointIndex), initialFrame);
-                            if (!joint.has_value()) {
-                                equipmentError = "equipment joint is outside character skeleton";
-                                continue;
-                            }
-                            if (!monsterEquipment.load(plug)) {
-                                equipmentError = monsterEquipment.error();
-                                continue;
-                            }
-                            if (!monsterEquipment.update(*joint,
-                                                         monsterModel.renderCenterX(),
-                                                         monsterModel.renderCenterZ(),
-                                                         monsterModel.renderMinimumY())) {
-                                equipmentError = monsterEquipment.error();
-                                monsterEquipment.unload();
-                                continue;
-                            }
-                            equipmentReady = true;
-                            break;
-                        } catch (const std::exception& exception) {
-                            equipmentError = exception.what();
-                        }
-                    }
-                }
-            }
-
-            status = std::string(mapReady ? "REAL SMD OK" : "SMD FAIL")
-                + " | " + (modelReady ? "REAL N3 MONSTER OK" : "N3 MONSTER FAIL")
-                + " | " + (animationReady ? "REAL N3 ANIM OK" : "N3 ANIM FAIL")
-                + " | " + (equipmentReady ? "REAL N3 EQUIPMENT OK" : "N3 EQUIPMENT UNAVAILABLE")
+            status += std::string(" | ") + (mapReady ? "SMD OK" : "SMD FAIL")
+                + " | " + (looksReady ? "NPC_LOOKS OK" : "NPC_LOOKS FAIL")
+                + " | MODELS " + std::to_string(monsterVisuals.loadedCount())
+                + "/" + std::to_string(monsterVisuals.mappedCount())
                 + (mapPath.has_value() ? " | " + mapPath->filename().string() : "");
-            if (!modelReady && !monsterModel.error().empty()) status += " | " + monsterModel.error();
-            if (!equipmentReady && !equipmentError.empty()) status += " | " + equipmentError;
+            if (!looksReady && !monsterVisuals.error().empty()) status += " | " + monsterVisuals.error();
         } catch (const std::exception& exception) {
-            status = std::string("KO content hatasi: ") + exception.what();
+            status += std::string(" | KO content hatasi: ") + exception.what();
         }
+    } else {
+        status += " | KO asset set bulunamadi";
     }
 
-    OfflineRuntime runtime;
-    runtime.initialize();
     Camera3D camera {};
     camera.up = {0.0F, 1.0F, 0.0F};
     camera.fovy = 52.0F;
@@ -359,8 +331,6 @@ int main() {
     float cameraPitch = 0.42F;
     float cameraDistance = 10.5F;
     bool inventoryOpen = false;
-    bool animationFailureReported = false;
-    bool equipmentFailureReported = false;
     const std::array<int, 10> skillKeys {KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR, KEY_FIVE, KEY_SIX, KEY_SEVEN, KEY_EIGHT, KEY_NINE, KEY_ZERO};
 
     while (!WindowShouldClose()) {
@@ -385,42 +355,34 @@ int main() {
         }
 
         const auto target = runtime.nearestAliveMonster(24.0F);
-        for (std::size_t index = 0; index < skillKeys.size(); ++index) if (IsKeyPressed(skillKeys[index])) runtime.useSkill(index, target);
+        for (std::size_t index = 0; index < skillKeys.size(); ++index) {
+            if (IsKeyPressed(skillKeys[index])) runtime.useSkill(index, target);
+        }
         if (IsKeyPressed(KEY_I)) inventoryOpen = !inventoryOpen;
         if (IsKeyPressed(KEY_F5)) runtime.save();
 
-        std::vector<Vec3> previousMonsterPositions;
-        previousMonsterPositions.reserve(runtime.monsters().size());
-        for (const auto& monster : runtime.monsters()) previousMonsterPositions.push_back(monster.position);
+        std::vector<Vec3> previousPositions;
+        previousPositions.reserve(runtime.monsters().size());
+        for (const auto& monster : runtime.monsters()) previousPositions.push_back(monster.position);
         runtime.update(delta);
 
-        float activeAnimationFrame = 0.0F;
-        if (monsterModel.ready() && monsterAnimation.ready()) {
-            const N3AnimationState selected = selectMonsterAnimation(previousMonsterPositions, runtime.monsters());
-            const bool restartAttack = selected == N3AnimationState::Attack && monsterAnimation.state() != selected;
-            monsterAnimation.setState(selected, restartAttack);
-            monsterAnimation.update(delta);
-            activeAnimationFrame = monsterAnimation.frame();
-            if (!monsterModel.updateAnimation(activeAnimationFrame) && !animationFailureReported) {
-                status += " | N3 SKIN UPDATE FAIL: " + monsterModel.error();
-                animationFailureReported = true;
+        monsterVisuals.beginFrame();
+        std::unordered_map<std::uint32_t, N3AnimationState> modelStates;
+        for (std::size_t index = 0; index < runtime.monsters().size(); ++index) {
+            const auto& monster = runtime.monsters()[index];
+            if (!monster.alive) continue;
+            const auto& definition = runtime.monsterTemplates()[monster.templateIndex];
+            N3AnimationState state = N3AnimationState::Idle;
+            if (monster.attackCooldown > definition.attackDelay * 0.72F) state = N3AnimationState::Attack;
+            else if (index < previousPositions.size()) {
+                const float dx = monster.position.x - previousPositions[index].x;
+                const float dz = monster.position.z - previousPositions[index].z;
+                if (dx * dx + dz * dz > 0.000001F) state = N3AnimationState::Move;
             }
+            auto [iterator, inserted] = modelStates.emplace(definition.modelId, state);
+            if (!inserted && statePriority(state) > statePriority(iterator->second)) iterator->second = state;
         }
-
-        if (monsterEquipment.ready() && monsterModel.ready()) {
-            const auto joint = monsterModel.jointWorldMatrix(
-                static_cast<std::size_t>(monsterEquipment.jointIndex()), activeAnimationFrame);
-            if ((!joint.has_value()
-                 || !monsterEquipment.update(*joint,
-                                             monsterModel.renderCenterX(),
-                                             monsterModel.renderCenterZ(),
-                                             monsterModel.renderMinimumY()))
-                && !equipmentFailureReported) {
-                status += " | N3 EQUIPMENT UPDATE FAIL";
-                if (!monsterEquipment.error().empty()) status += ": " + monsterEquipment.error();
-                equipmentFailureReported = true;
-            }
-        }
+        for (const auto& [modelId, state] : modelStates) monsterVisuals.update(modelId, state, delta);
 
         const SmdMap* activeMap = terrain.ready() ? &worldMap : nullptr;
         const Vec3& player = runtime.player().position;
@@ -443,8 +405,7 @@ int main() {
                         runtime.monsterTemplates()[monster.templateIndex],
                         target.has_value() && *target == index,
                         groundHeight(activeMap, monster.position),
-                        monsterModel,
-                        monsterEquipment);
+                        monsterVisuals);
         }
         EndMode3D();
 
@@ -454,6 +415,7 @@ int main() {
     }
 
     runtime.save();
+    monsterVisuals.unload();
     CloseWindow();
     return 0;
 }
