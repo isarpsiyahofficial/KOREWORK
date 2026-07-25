@@ -39,6 +39,7 @@ add_library(korework_runtime STATIC
     src/client/n3_animation_player.cpp
     src/offline_roster.cpp
     src/offline_runtime.cpp
+    src/offline_world_state.cpp
 )
 target_include_directories(korework_runtime PUBLIC src)
 target_link_libraries(korework_runtime PUBLIC korework_content)
@@ -47,6 +48,7 @@ target_compile_definitions(korework_runtime PUBLIC KOREWORK_OFFLINE_ONLY=1)
 add_executable(korework
     src/main.cpp
     src/game_application.cpp
+    src/offline_npc_system.cpp
     src/client/ko_monster_visual_bank.cpp
     src/client/n3_character_attachment.cpp
     src/client/n3_character_model.cpp
