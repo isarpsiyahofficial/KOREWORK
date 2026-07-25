@@ -100,6 +100,10 @@ if(BUILD_TESTING)
     target_link_libraries(korework_profile_runtime_smoke PRIVATE korework_runtime)
     add_test(NAME profile-equipment-upgrade-smoke COMMAND korework_profile_runtime_smoke)
 
+    add_executable(korework_world_state_smoke tests/world_state_smoke.cpp)
+    target_link_libraries(korework_world_state_smoke PRIVATE korework_runtime)
+    add_test(NAME quest-shop-healer-state-smoke COMMAND korework_world_state_smoke)
+
     add_executable(korework_smd_smoke tests/smd_map_smoke.cpp)
     target_link_libraries(korework_smd_smoke PRIVATE korework_content)
     add_test(NAME fire-drake-smd-smoke COMMAND korework_smd_smoke)
@@ -139,6 +143,7 @@ if(BUILD_TESTING)
     set(KOREWORK_ACCEPTANCE_TEST_TARGETS
         korework_runtime_smoke
         korework_profile_runtime_smoke
+        korework_world_state_smoke
         korework_smd_smoke
         korework_texture_smoke
         korework_skeleton_smoke
@@ -169,6 +174,7 @@ if(BUILD_TESTING)
 
     add_dependencies(korework_runtime_smoke
         korework_profile_runtime_smoke
+        korework_world_state_smoke
         korework_smd_smoke
         korework_texture_smoke
         korework_skeleton_smoke
