@@ -148,6 +148,14 @@ if(BUILD_TESTING)
         endforeach()
     endif()
 
+    set(KOREWORK_REAL_ASSET_ROOT "${CMAKE_SOURCE_DIR}/upstream/ko-assets")
+    if(EXISTS "${KOREWORK_REAL_ASSET_ROOT}/game" AND EXISTS "${KOREWORK_REAL_ASSET_ROOT}/server")
+        add_test(NAME real-ko-content-probe
+                 COMMAND korework_content_probe "${KOREWORK_REAL_ASSET_ROOT}")
+        add_test(NAME real-ko-equipment-probe
+                 COMMAND korework_equipment_probe "${KOREWORK_REAL_ASSET_ROOT}")
+    endif()
+
     add_dependencies(korework_runtime_smoke
         korework_smd_smoke
         korework_texture_smoke
@@ -158,6 +166,8 @@ if(BUILD_TESTING)
         korework_animation_player_smoke
         korework_sql_compiler_smoke
         korework_npc_looks_smoke
+        korework_content_probe
+        korework_equipment_probe
     )
 endif()
 
