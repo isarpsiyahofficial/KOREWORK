@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(KOREWORKOffline VERSION 0.8.1 LANGUAGES CXX)
+project(KOREWORKOffline VERSION 0.9.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,10 +27,12 @@ add_library(korework_content STATIC
     src/content/n3_skeleton.cpp
     src/content/n3_texture.cpp
     src/content/smd_map.cpp
+    src/data/game_data_pack.cpp
 )
 target_include_directories(korework_content PUBLIC src)
 
 add_library(korework_runtime STATIC
+    src/client/n3_animation_player.cpp
     src/offline_runtime.cpp
 )
 target_include_directories(korework_runtime PUBLIC src)
@@ -39,7 +41,9 @@ target_compile_definitions(korework_runtime PUBLIC KOREWORK_OFFLINE_ONLY=1)
 
 add_executable(korework
     src/main.cpp
+    src/client/n3_character_attachment.cpp
     src/client/n3_character_model.cpp
+    src/client/n3_equipment_model.cpp
     src/client/smd_terrain.cpp
 )
 target_include_directories(korework PRIVATE src)
@@ -98,6 +102,14 @@ if(BUILD_TESTING)
     add_executable(korework_equipment_smoke tests/n3_equipment_smoke.cpp)
     target_link_libraries(korework_equipment_smoke PRIVATE korework_content)
     add_test(NAME n3-equipment-smoke COMMAND korework_equipment_smoke)
+
+    add_executable(korework_game_data_smoke tests/game_data_pack_smoke.cpp)
+    target_link_libraries(korework_game_data_smoke PRIVATE korework_content)
+    add_test(NAME sql-free-game-data-pack-smoke COMMAND korework_game_data_smoke)
+
+    add_executable(korework_animation_player_smoke tests/n3_animation_player_smoke.cpp)
+    target_link_libraries(korework_animation_player_smoke PRIVATE korework_runtime)
+    add_test(NAME n3-runtime-animation-player-smoke COMMAND korework_animation_player_smoke)
 endif()
 
 install(TARGETS korework RUNTIME DESTINATION .)
