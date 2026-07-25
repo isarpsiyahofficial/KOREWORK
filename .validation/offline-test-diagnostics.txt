@@ -1,4 +1,4 @@
-validated_commit=f84ceb54e0550ca0d2b0bf90a38d07613943e046
+validated_commit=1a70ade6c78c9f11740eb63f772061a3c1a35bc6
 offline-runtime-smoke=success
 profile-equipment-upgrade-smoke=success
 quest-shop-healer-state-smoke=success
@@ -15,4 +15,5 @@ openko-sql-to-kopack-smoke=success
 encrypted-npc-looks-smoke=success
 real-ko-content-probe=success
 real-ko-equipment-probe=success
+real-ko-player-probe=success
 failed=0
