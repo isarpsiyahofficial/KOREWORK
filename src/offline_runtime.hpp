@@ -1,9 +1,11 @@
 #pragma once
 
 #include "data/game_data_pack.hpp"
+#include "offline_roster.hpp"
 
 #include <array>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -68,24 +70,38 @@ struct InventoryEntry {
     std::uint32_t itemId = 0;
     std::string name;
     int count = 0;
+    std::uint8_t upgradeLevel = 0;
 };
 
 struct PlayerState {
+    std::string name = "Adventurer";
+    PlayerClass playerClass = PlayerClass::Warrior;
     Vec3 position {0.0F, 0.0F, 0.0F};
-    float hp = 180.0F;
-    float maxHp = 180.0F;
-    float mp = 120.0F;
-    float maxMp = 120.0F;
+    float hp = 220.0F;
+    float maxHp = 220.0F;
+    float mp = 80.0F;
+    float maxMp = 80.0F;
     int level = 1;
     int exp = 0;
-    int gold = 0;
+    int gold = 2000;
     int deaths = 0;
+    int strength = 65;
+    int stamina = 60;
+    int dexterity = 50;
+    int intelligence = 30;
+    int magicPower = 20;
+    int bonusPoints = 0;
+    int attackPower = 10;
+    int defensePower = 5;
+    std::array<std::uint32_t, 14> equipmentItemIds {};
+    std::array<std::uint8_t, 14> equipmentUpgradeLevels {};
 };
 
 class OfflineRuntime final {
 public:
     OfflineRuntime();
 
+    void configureProfile(std::size_t slot, std::string name, PlayerClass playerClass);
     void initialize();
     void initialize(const std::filesystem::path& dataPackPath);
     void update(float deltaSeconds);
@@ -103,13 +119,21 @@ public:
     [[nodiscard]] const std::deque<std::string>& log() const noexcept;
     [[nodiscard]] const data::GameDataPack& gameData() const noexcept { return gameData_; }
     [[nodiscard]] bool usingGameData() const noexcept { return usingGameData_; }
+    [[nodiscard]] std::size_t profileSlot() const noexcept { return profileSlot_; }
 
     [[nodiscard]] std::optional<std::size_t> nearestAliveMonster(float maxDistance) const;
+    [[nodiscard]] const data::ItemRecord* itemRecord(std::uint32_t itemId) const noexcept;
     bool useSkill(std::size_t slot, std::optional<std::size_t> targetIndex);
+    bool equipInventory(std::size_t inventoryIndex);
+    bool unequip(std::size_t equipmentSlot);
+    bool upgradeInventory(std::size_t inventoryIndex);
+    bool spendStatPoint(std::size_t statIndex);
     void movePlayer(Vec3 delta);
 
 private:
     void loadGameData(const std::filesystem::path& dataPackPath);
+    void applyClassDefaults();
+    void recalculateDerivedStats(bool restoreResources);
     void createTemplates();
     void createFallbackTemplates();
     void createSkills();
@@ -120,15 +144,19 @@ private:
     void damageMonster(std::size_t monsterIndex, float amount, const SkillDefinition& skill);
     void killMonster(MonsterState& monster, const MonsterTemplate& definition);
     void awardDrops(const MonsterState& monster, const MonsterTemplate& definition);
-    void addInventory(std::uint32_t itemId, std::string name, int count);
+    void addInventory(std::uint32_t itemId, std::string name, int count, std::uint8_t upgradeLevel = 0);
     void appendLog(std::string message);
     void respawnPlayer();
+    [[nodiscard]] bool meetsRequirements(const data::ItemRecord& item) const noexcept;
     [[nodiscard]] std::filesystem::path savePath() const;
     [[nodiscard]] std::string itemName(std::uint32_t itemId) const;
 
     PlayerState player_;
     data::GameDataPack gameData_;
     bool usingGameData_ = false;
+    std::size_t profileSlot_ = 0U;
+    std::string configuredName_ = "Adventurer";
+    PlayerClass configuredClass_ = PlayerClass::Warrior;
     std::vector<MonsterTemplate> monsterTemplates_;
     std::vector<MonsterState> monsters_;
     std::array<SkillDefinition, 10> skills_ {};
@@ -136,6 +164,7 @@ private:
     std::vector<InventoryEntry> inventory_;
     std::deque<std::string> log_;
     std::unordered_map<std::uint32_t, std::size_t> dropTableIndex_;
+    std::unordered_map<std::uint32_t, std::size_t> itemIndex_;
     std::unordered_map<std::uint32_t, std::string> itemNames_;
     std::uint64_t nextRuntimeId_ = 1;
     float autosaveTimer_ = 0.0F;
