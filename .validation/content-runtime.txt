@@ -1,7 +1,7 @@
 status=passed
-run_id=30143965192
+run_id=30143985606
 run_attempt=1
-validated_commit=0de1a38a2b52e8e411f36217f7f83787eeadd8eb
+validated_commit=1f09c2637ebeaecb938e8c76f815491f9abd545d
 branch=integration/runtime-animation-state-v1
 linux=success
 windows=success
@@ -13,4 +13,4 @@ runtime_n3_animation_state=passed
 real_n3_equipment_chain=passed
 sql_free_kopack=passed
 real_ntf_texture_decode=passed
-generated_utc=2026-07-25T04:26:58Z
+generated_utc=2026-07-25T04:27:13Z
