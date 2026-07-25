@@ -1,0 +1,32 @@
+name: Diagnose Offline Tests
+
+on:
+  push:
+    branches:
+      - integration/complete-offline-fire-drake-v1
+    paths-ignore:
+      - '.validation/**'
+  workflow_dispatch:
+
+jobs:
+  diagnose-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ libasound2-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxcursor-dev libxinerama-dev
+      - name: Configure and build tests
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build build --target korework_runtime_smoke korework_game_data_smoke korework_sql_compiler_smoke korework_animation_player_smoke
+      - name: Runtime smoke
+        run: build/korework_runtime_smoke
+      - name: KOPACK smoke
+        run: build/korework_game_data_smoke
+      - name: SQL compiler smoke
+        run: build/korework_sql_compiler_smoke
+      - name: Animation player smoke
+        run: build/korework_animation_player_smoke
