@@ -16,6 +16,12 @@ namespace korework {
 
 class OfflineNpcSystem final {
 public:
+    enum class NpcKind {
+        Captain,
+        Merchant,
+        Healer
+    };
+
     explicit OfflineNpcSystem(std::size_t profileSlot = 0U);
 
     void initialize(OfflineRuntime& runtime, const content::SmdMap* map);
@@ -34,12 +40,6 @@ private:
         Merchant,
         Healer,
         Warp
-    };
-
-    enum class NpcKind {
-        Captain,
-        Merchant,
-        Healer
     };
 
     struct Npc {
