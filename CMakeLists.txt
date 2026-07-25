@@ -26,6 +26,7 @@ add_library(korework_content STATIC
     src/content/n3_equipment.cpp
     src/content/n3_skeleton.cpp
     src/content/n3_texture.cpp
+    src/content/npc_looks_table.cpp
     src/content/smd_map.cpp
     src/data/game_data_pack.cpp
     src/data/openko_sql_compiler.cpp
@@ -120,6 +121,10 @@ if(BUILD_TESTING)
     target_link_libraries(korework_sql_compiler_smoke PRIVATE korework_content)
     add_test(NAME openko-sql-to-kopack-smoke COMMAND korework_sql_compiler_smoke)
 
+    add_executable(korework_npc_looks_smoke tests/npc_looks_table_smoke.cpp)
+    target_link_libraries(korework_npc_looks_smoke PRIVATE korework_content)
+    add_test(NAME encrypted-npc-looks-smoke COMMAND korework_npc_looks_smoke)
+
     add_dependencies(korework_runtime_smoke
         korework_smd_smoke
         korework_texture_smoke
@@ -129,6 +134,7 @@ if(BUILD_TESTING)
         korework_game_data_smoke
         korework_animation_player_smoke
         korework_sql_compiler_smoke
+        korework_npc_looks_smoke
     )
 endif()
 
