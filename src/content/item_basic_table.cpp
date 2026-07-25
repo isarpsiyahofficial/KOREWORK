@@ -58,8 +58,15 @@ std::filesystem::path ItemBasicTable::locate(const std::filesystem::path& assetR
 
 ItemBasicTable ItemBasicTable::load(const std::filesystem::path& encryptedTablePath) {
     const EncryptedKoTable source = EncryptedKoTable::load(encryptedTablePath);
-    if (source.columnTypes().size() < 37U) {
-        throw std::runtime_error("Item_Org table has fewer than 37 columns");
+
+    // Fire Drake clients exist with 35, 36 and 37-column Item_Org layouts.
+    // The fields required by the offline runtime end at column 34; sell-group
+    // and grade columns are optional trailing fields and must not reject an
+    // otherwise valid legacy table.
+    constexpr std::size_t RequiredColumnCount = 35U;
+    if (source.columnTypes().size() < RequiredColumnCount) {
+        throw std::runtime_error("Item_Org table has " + std::to_string(source.columnTypes().size())
+                                 + " columns; at least " + std::to_string(RequiredColumnCount) + " are required");
     }
 
     ItemBasicTable table;
@@ -67,7 +74,10 @@ ItemBasicTable ItemBasicTable::load(const std::filesystem::path& encryptedTableP
     table.index_.reserve(source.rows().size());
 
     for (const KoTableRow& row : source.rows()) {
-        if (row.size() < 37U) throw std::runtime_error("Item_Org row has fewer than 37 columns");
+        if (row.size() < RequiredColumnCount) {
+            throw std::runtime_error("Item_Org row has " + std::to_string(row.size())
+                                     + " columns; at least " + std::to_string(RequiredColumnCount) + " are required");
+        }
         const std::int64_t rawId = EncryptedKoTable::integer(row, 0);
         if (rawId <= 0 || static_cast<std::uint64_t>(rawId) > std::numeric_limits<std::uint32_t>::max()) continue;
 
@@ -119,4 +129,4 @@ const data::ItemRecord* ItemBasicTable::find(std::uint32_t id) const noexcept {
     return iterator == index_.end() ? nullptr : &items_[iterator->second];
 }
 
-} // namespace korework::content
+} // namespace korework::content {
