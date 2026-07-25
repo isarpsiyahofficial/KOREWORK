@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -129,6 +130,39 @@ public:
     bool upgradeInventory(std::size_t inventoryIndex);
     bool spendStatPoint(std::size_t statIndex);
     void movePlayer(Vec3 delta);
+    void refreshSkills() { createSkills(); }
+
+    bool purchaseItem(std::uint32_t itemId, int count, int unitPrice) {
+        if (count <= 0 || unitPrice < 0 || itemRecord(itemId) == nullptr) return false;
+        const std::int64_t total = static_cast<std::int64_t>(count) * static_cast<std::int64_t>(unitPrice);
+        if (total > player_.gold || total > std::numeric_limits<int>::max()) return false;
+        player_.gold -= static_cast<int>(total);
+        addInventory(itemId, itemName(itemId), count);
+        appendLog(itemName(itemId) + " satin alindi.");
+        save();
+        return true;
+    }
+
+    bool restoreAtHealer(int cost) {
+        if (cost < 0 || player_.gold < cost) return false;
+        if (player_.hp >= player_.maxHp && player_.mp >= player_.maxMp) return false;
+        player_.gold -= cost;
+        player_.hp = player_.maxHp;
+        player_.mp = player_.maxMp;
+        appendLog("Sifaci HP ve MP degerlerini yeniledi.");
+        save();
+        return true;
+    }
+
+    bool grantQuestReward(std::uint32_t itemId, int count, int gold) {
+        if (count < 0 || gold < 0 || player_.gold > std::numeric_limits<int>::max() - gold) return false;
+        if (itemId != 0U && count > 0 && itemRecord(itemId) == nullptr) return false;
+        player_.gold += gold;
+        if (itemId != 0U && count > 0) addInventory(itemId, itemName(itemId), count);
+        appendLog("Gorev odulu alindi: +" + std::to_string(gold) + " Noah.");
+        save();
+        return true;
+    }
 
 private:
     void loadGameData(const std::filesystem::path& dataPackPath);
