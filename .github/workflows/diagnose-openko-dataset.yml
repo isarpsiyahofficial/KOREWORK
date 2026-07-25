@@ -26,26 +26,42 @@ jobs:
         run: |
           git clone --filter=blob:none --no-checkout https://github.com/Open-KO/OpenKO-db.git upstream/openko-db
           git -C upstream/openko-db checkout "$OPENKO_DB_COMMIT"
-      - name: Build compiler
+          test -s upstream/openko-db/ManualSetup/6_InsertData_K_NPCPOS.sql
+      - name: Build compilers
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
-          cmake --build build --target korework_dataset_compiler
-      - id: compile
+          cmake --build build --target korework_dataset_compiler korework_spawn_compiler
+      - id: dataset
         name: Compile real dataset
         continue-on-error: true
         run: |
           set -o pipefail
           build/bin/korework_dataset_compiler upstream/openko-db /tmp/game_data.kopack 2>&1 | tee /tmp/dataset-diagnostic.txt
+      - id: spawns
+        name: Compile real spawn table
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          build/bin/korework_spawn_compiler upstream/openko-db /tmp/world_spawns.kospawn 2>&1 | tee /tmp/spawn-diagnostic.txt
+          test -s /tmp/world_spawns.kospawn
+          grep -Eq 'Spawns: [1-9][0-9]{2,}' /tmp/spawn-diagnostic.txt
+          grep -Eq 'Monster spawn rows: [1-9][0-9]{2,}' /tmp/spawn-diagnostic.txt
+          grep -Eq 'Zones: [1-9][0-9]*' /tmp/spawn-diagnostic.txt
       - name: Record diagnostic
         if: always() && github.event_name == 'push'
         env:
-          OUTCOME: ${{ steps.compile.outcome }}
+          DATASET_OUTCOME: ${{ steps.dataset.outcome }}
+          SPAWN_OUTCOME: ${{ steps.spawns.outcome }}
         run: |
           mkdir -p .validation
           {
             echo "validated_commit=${GITHUB_SHA}"
-            echo "outcome=${OUTCOME}"
+            echo "dataset_outcome=${DATASET_OUTCOME}"
+            echo "spawn_outcome=${SPAWN_OUTCOME}"
+            echo "--- dataset ---"
             sed -n '1,80p' /tmp/dataset-diagnostic.txt
+            echo "--- spawns ---"
+            sed -n '1,80p' /tmp/spawn-diagnostic.txt
           } > .validation/openko-dataset-diagnostic.txt
           git config user.name github-actions
           git config user.email github-actions@github.com
@@ -53,5 +69,5 @@ jobs:
           git commit -m "Record OpenKO dataset diagnostic [skip ci]"
           git push origin HEAD:${GITHUB_REF_NAME}
       - name: Enforce result
-        if: steps.compile.outcome != 'success'
+        if: steps.dataset.outcome != 'success' || steps.spawns.outcome != 'success'
         run: exit 1
