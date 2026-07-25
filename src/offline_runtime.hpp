@@ -3,6 +3,7 @@
 #include "data/game_data_pack.hpp"
 #include "offline_roster.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstddef>
@@ -65,6 +66,13 @@ struct MonsterState {
     float attackCooldown = 0.0F;
     float respawnTimer = 0.0F;
     bool alive = true;
+};
+
+struct MonsterSpawnPlacement {
+    std::uint32_t npcId = 0;
+    Vec3 minimum;
+    Vec3 maximum;
+    std::uint16_t count = 1;
 };
 
 struct InventoryEntry {
@@ -131,6 +139,49 @@ public:
     bool spendStatPoint(std::size_t statIndex);
     void movePlayer(Vec3 delta);
     void refreshSkills() { createSkills(); }
+
+    std::size_t replaceWorldSpawns(const std::vector<MonsterSpawnPlacement>& placements,
+                                   std::size_t maximumMonsters = 192U) {
+        if (placements.empty() || monsterTemplates_.empty() || maximumMonsters == 0U) return monsters_.size();
+        std::vector<MonsterState> generated;
+        generated.reserve(std::min<std::size_t>(maximumMonsters, placements.size() * 3U));
+        std::uint64_t runtimeId = 1U;
+        for (const auto& placement : placements) {
+            if (placement.npcId == 0U || placement.npcId > std::numeric_limits<std::uint16_t>::max()) continue;
+            const auto definition = std::find_if(monsterTemplates_.begin(), monsterTemplates_.end(), [&](const MonsterTemplate& candidate) {
+                return candidate.sid == placement.npcId;
+            });
+            if (definition == monsterTemplates_.end()) continue;
+            const std::size_t templateIndex = static_cast<std::size_t>(std::distance(monsterTemplates_.begin(), definition));
+            const std::size_t requested = std::clamp<std::size_t>(placement.count, 1U, 12U);
+            const float minimumX = std::min(placement.minimum.x, placement.maximum.x);
+            const float maximumX = std::max(placement.minimum.x, placement.maximum.x);
+            const float minimumZ = std::min(placement.minimum.z, placement.maximum.z);
+            const float maximumZ = std::max(placement.minimum.z, placement.maximum.z);
+            for (std::size_t index = 0U; index < requested && generated.size() < maximumMonsters; ++index) {
+                const float fractionX = static_cast<float>((index * 37U + placement.npcId) % 97U) / 96.0F;
+                const float fractionZ = static_cast<float>((index * 53U + placement.npcId * 3U) % 89U) / 88.0F;
+                const Vec3 position {
+                    minimumX + (maximumX - minimumX) * fractionX,
+                    placement.minimum.y,
+                    minimumZ + (maximumZ - minimumZ) * fractionZ
+                };
+                MonsterState monster;
+                monster.runtimeId = runtimeId++;
+                monster.templateIndex = templateIndex;
+                monster.position = position;
+                monster.spawnPosition = position;
+                monster.hp = definition->maxHp;
+                generated.push_back(monster);
+            }
+            if (generated.size() >= maximumMonsters) break;
+        }
+        if (!generated.empty()) {
+            monsters_ = std::move(generated);
+            nextRuntimeId_ = runtimeId;
+        }
+        return monsters_.size();
+    }
 
     bool purchaseItem(std::uint32_t itemId, int count, int unitPrice) {
         if (count <= 0 || unitPrice < 0 || itemRecord(itemId) == nullptr) return false;
