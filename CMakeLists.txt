@@ -94,6 +94,10 @@ if(BUILD_TESTING)
     target_link_libraries(korework_runtime_smoke PRIVATE korework_runtime)
     add_test(NAME offline-runtime-smoke COMMAND korework_runtime_smoke)
 
+    add_executable(korework_profile_runtime_smoke tests/profile_runtime_smoke.cpp)
+    target_link_libraries(korework_profile_runtime_smoke PRIVATE korework_runtime)
+    add_test(NAME profile-equipment-upgrade-smoke COMMAND korework_profile_runtime_smoke)
+
     add_executable(korework_smd_smoke tests/smd_map_smoke.cpp)
     target_link_libraries(korework_smd_smoke PRIVATE korework_content)
     add_test(NAME fire-drake-smd-smoke COMMAND korework_smd_smoke)
@@ -132,6 +136,7 @@ if(BUILD_TESTING)
 
     set(KOREWORK_ACCEPTANCE_TEST_TARGETS
         korework_runtime_smoke
+        korework_profile_runtime_smoke
         korework_smd_smoke
         korework_texture_smoke
         korework_skeleton_smoke
@@ -161,6 +166,7 @@ if(BUILD_TESTING)
     endif()
 
     add_dependencies(korework_runtime_smoke
+        korework_profile_runtime_smoke
         korework_smd_smoke
         korework_texture_smoke
         korework_skeleton_smoke
