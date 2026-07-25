@@ -1,60 +1,92 @@
-# KOREWORK
+# KOREWORK — Offline Fire Drake
 
-Knight Online Fire Drake v1453 dönemini temel alan, Windows ve Linux uyumlu offline PC rework projesi.
+KOREWORK, Fire Drake v1453 döneminin açık kaynak veri ve varlık yapısını tek süreçte çalışan Windows/Linux çevrimdışı PC oyununa dönüştüren bir rework projesidir.
 
-## Mevcut durum
+Dağıtım paketi sunucu kurulumu istemez. `KOREWORK.exe` veya `KOREWORK` doğrudan çalıştırılır; LoginServer, GameServer, AIServer, SQL sunucusu, localhost servisi ya da ağ bağlantısı açılmaz.
 
-> **Önemli:** Repodaki mevcut küçük executable, yalnızca tek süreçte sunucusuz çalışma yaklaşımını doğrulayan teknik bir prototiptir. Fire Drake offline rework tamamlanmış değildir ve bu prototip nihai oyun olarak kabul edilmez.
+## Pakette çalışan sistemler
 
-Gerçek offline sürümün tamamlanmış sayılması için aşağıdakilerin oyuna aktarılması ve birlikte çalışması gerekir:
+- Üç ayrı yerel karakter slotu
+- Warrior, Rogue, Mage ve Priest sınıfları
+- Sınıfa özel başlangıç statları ve skill seçimi
+- Karakter oluşturma, seçme, silme, kayıt ve yeniden yükleme
+- Fire Drake SMD terrain, yükseklik, harita sınırı, regene ve warp verileri
+- OpenKO `K_NPCPOS` kayıtlarından derlenen zone ve canavar yerleşimleri
+- OpenKO monster, drop, skill ve class tablolarından derlenen SQL'siz KOPACK
+- Şifreli Fire Drake `Item_Org` tablosundan gerçek item adı, açıklama, slot, görünüm, ikon, hasar, zırh, dayanıklılık, fiyat ve gereksinim verileri
+- Gerçek N3 canavar ve oyuncu karakter modelleri
+- N3 iskelet, idle/hareket/saldırı animasyonları ve texture çözümü
+- Item görünüm kimliğiyle sağ el N3 silah bağlantısı
+- Canavar takip, saldırı, ölüm, yeniden doğma, EXP ve Noah döngüsü
+- Drop, envanter, 14 ekipman slotu, takma/çıkarma ve upgrade
+- Stat puanı dağıtımı ve türetilmiş saldırı/savunma değerleri
+- Yakın dövüş, projectile ve şifa skill efektleri
+- Başlangıç görevi, tüccar, şifacı ve warp etkileşimleri
+- Responsive `1 2 3 4 5 6 7 8 9 0` skill bar ve HUD
+- Profil başına ayrı görev, envanter, ekipman, stat ve ilerleme kaydı
 
-- Fire Drake haritaları, terrain, collision, warp ve spawn verileri
-- Karakter modelleri, iskeletler ve animasyonlar
-- Zırh, silah, kalkan ve ekipman görünüm değişimleri
-- Canavar modelleri, animasyonları, AI kayıtları ve spawn tabloları
-- Skill tabloları, animasyon zamanlamaları, efektler, projectile ve buff/debuff mantıkları
-- Warrior, Rogue, Mage ve Priest jobları ile stat/katsayı sistemleri
-- Item, drop, upgrade, envanter ve ekipman kuralları
-- NPC, görev, mağaza ve etkileşim verileri
-- Fire Drake dönemine uygun HUD ve tek responsive `1 2 3 4 5 6 7 8 9 0` skill bar
-- Yerel karakter oluşturma, seçme, kayıt/yükleme ve haritaya giriş
-- Windows ve Linux üzerinde aynı içerikle açılabilen build
+## Çalıştırma
 
-Bu maddeler gerçekleşmeden proje “oynanabilir Fire Drake offline sürümü” olarak tanımlanmayacaktır.
+### Windows
 
-## Hedef offline çalışma modeli
+1. `KOREWORK-Windows-Complete.zip` arşivini tamamen çıkarın.
+2. `KOREWORK-Windows/KOREWORK.exe` dosyasını çalıştırın.
 
-Nihai KOREWORK tek süreç olarak çalışacaktır:
+### Linux
 
-- GameServer çalıştırmayacak.
-- AIServer çalıştırmayacak.
-- LoginServer çalıştırmayacak.
-- SQL Server, PostgreSQL, MySQL veya SQLite sunucusu istemeyecek.
-- `localhost` bağlantısı açmayacak.
-- Socket veya ağ bağlantısı kullanmayacak.
-- Karakter, harita, canavar, skill, drop ve kayıt işlemlerini aynı executable içinde yürütecek.
-- Kayıt dosyalarını kullanıcının profil dizininde tutacak.
+1. `KOREWORK-Linux-Complete.tar.gz` arşivini çıkarın.
+2. Paket klasöründe `./KOREWORK` komutunu çalıştırın.
 
-## Teknik prototipte doğrulananlar
+Executable, `data/game_data.kopack`, `data/world_spawns.kospawn` ve `assets/ko` klasörü aynı paket yapısında kalmalıdır.
 
-- Tek süreçte çalışan Windows/Linux executable
-- Socket, localhost ve SQL olmadan runtime
-- Yerel kayıt/yükleme yaklaşımı
-- Basit hareket, kamera, AI, saldırı, drop ve envanter döngüsü
-- Responsive 10 slotlu `1 2 3 4 5 6 7 8 9 0` skill bar yaklaşımı
+## Kontroller
 
-Bu maddeler yalnızca mimari doğrulamadır; Fire Drake içerik aktarımının yerine geçmez.
+- `W A S D`: hareket
+- `Sol Shift`: koşma
+- `Sağ fare + hareket`: kamera
+- `Fare tekerleği`: yakınlaştırma
+- `1–0`: skill kullanma
+- `F`: yakındaki NPC veya warp ile etkileşim
+- `I`: envanter ve ekipman
+- `E`: seçilen itemi takma
+- `U`: seçilen itemi yükseltme
+- `C`: karakter statları
+- `F1–F5`: açık stat panelinde puan dağıtma
+- `F5`: manuel kayıt
+- `Esc`: paneli kapatma veya karakter seçimine dönme
 
-## Güvenlik ilkeleri
+## Yerel veri dosyaları
 
-- Orijinal kaynak yapısı referans olarak değişmeden korunur.
-- Hazır `.exe`, `.dll`, launcher, injector, hook veya anti-cheat bileşenleri çalıştırılmaz.
-- Kaynağı olmayan binary dosyalar güvenilir kabul edilmez.
-- Rework kodu temiz kaynak koddan yeniden derlenir.
-- Fire Drake upstream'i oyun kuralı ve veri referansı olarak izole tutulur.
+- `data/game_data.kopack`: monster, drop, skill, class ve gerçek Item_Org kayıtları
+- `data/world_spawns.kospawn`: OpenKO K_NPCPOS zone ve yaratık yerleşimleri
+- `assets/ko`: sabitlenmiş SMD, N3 model, skeleton, animasyon, texture ve efekt ağacı
+- Kullanıcı kayıtları: kullanıcı profilindeki `.korework/saves` dizini
 
-## Upstream
+## Çevrimdışı çalışma ilkeleri
 
-Fire Drake v1453 kaynağı sabitlenmiş bir Git submodule olarak `upstream/fire-drake-v1453` altında tutulmaktadır.
+- Socket veya internet API'si kullanılmaz.
+- `localhost` bağlantısı açılmaz.
+- SQL Server, PostgreSQL, MySQL veya SQLite sunucusu çalıştırılmaz.
+- Oyun, AI, drop, skill, görev ve kayıt işlemleri aynı executable içinde yürütülür.
+- Kaynağı olmayan hazır executable, DLL, launcher, injector, hook veya anti-cheat bileşenleri çalıştırılmaz.
+- Rework kaynak koddan yeniden derlenir; upstream kaynaklar veri ve varlık referansı olarak izole tutulur.
 
-Sabitlenen upstream commit: `0f520272ae1f11472623d62bff76fff98562e7b3`
+## Otomatik kabul kapıları
+
+Windows ve Linux paketleri yayımlanmadan önce aşağıdaki kontroller zorunludur:
+
+- ağ ve veritabanı API'lerinin bulunmaması
+- iki platformda Release derleme ve CTest geçişi
+- gerçek SMD, N3 karakter, skeleton, animasyon, texture ve equipment probe'ları
+- gerçek oynanabilir N3 oyuncu karakter zinciri
+- OpenKO SQL → KOPACK round-trip ve checksum doğrulaması
+- OpenKO K_NPCPOS → KOSPAWN round-trip ve runtime yerleşim doğrulaması
+- gerçek Item_Org kataloğu
+- executable, KOPACK, KOSPAWN ve 100 MB üzeri asset ağacının dağıtım arşivinde bulunması
+
+## Sabitlenmiş upstream kaynaklar
+
+- Fire Drake v1453 kaynak referansı: `upstream/fire-drake-v1453`
+- KO varlık ağacı: `upstream/ko-assets`
+- OpenKO istemci kaynak referansı: `upstream/openko-client`
+- OpenKO veri seti paketleme sırasında sabit committen derlenir.
