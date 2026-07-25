@@ -1,8 +1,15 @@
 #include "offline_npc_system.hpp"
 
+#include "data/openko_spawn_table.hpp"
+
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
 #include <limits>
+#include <optional>
+#include <unordered_map>
+#include <vector>
 
 namespace korework {
 namespace {
@@ -14,6 +21,103 @@ Color npcColor(OfflineNpcSystem::NpcKind kind) {
         case OfflineNpcSystem::NpcKind::Healer: return Color{76, 139, 181, 255};
     }
     return GRAY;
+}
+
+std::optional<std::filesystem::path> locateSpawnTable() {
+    const std::filesystem::path current = std::filesystem::current_path();
+    const std::filesystem::path application = GetApplicationDirectory();
+    std::vector<std::filesystem::path> candidates;
+    if (const char* environment = std::getenv("KOREWORK_SPAWN_TABLE"); environment != nullptr && *environment != '\0') {
+        candidates.emplace_back(environment);
+    }
+    candidates.push_back(current / "data" / "world_spawns.kospawn");
+    candidates.push_back(application / "data" / "world_spawns.kospawn");
+    candidates.push_back(application.parent_path() / "data" / "world_spawns.kospawn");
+    std::error_code error;
+    for (const auto& candidate : candidates) {
+        if (std::filesystem::is_regular_file(candidate, error)) return std::filesystem::weakly_canonical(candidate, error);
+        error.clear();
+    }
+    return std::nullopt;
+}
+
+std::optional<std::uint16_t> forcedZone() {
+    const char* value = std::getenv("KOREWORK_ZONE_ID");
+    if (value == nullptr || *value == '\0') return std::nullopt;
+    try {
+        const unsigned long parsed = std::stoul(value);
+        if (parsed == 0UL || parsed > std::numeric_limits<std::uint16_t>::max()) return std::nullopt;
+        return static_cast<std::uint16_t>(parsed);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+std::size_t applyCompiledSpawns(OfflineRuntime& runtime, const content::SmdMap* map,
+                                const std::filesystem::path& spawnPath) {
+    const auto table = data::OpenKoSpawnTable::load(spawnPath);
+    std::unordered_map<std::uint32_t, int> templateLevels;
+    templateLevels.reserve(runtime.monsterTemplates().size());
+    for (const auto& definition : runtime.monsterTemplates()) templateLevels.emplace(definition.sid, definition.level);
+
+    std::unordered_map<std::uint16_t, std::size_t> zoneScores;
+    for (const auto& record : table.records()) {
+        if (record.actType >= 100U || record.count == 0U) continue;
+        const auto definition = templateLevels.find(record.npcId);
+        if (definition == templateLevels.end()) continue;
+        const int maximumLevel = std::max(15, runtime.player().level + 12);
+        const std::size_t population = std::min<std::size_t>(record.count, 12U);
+        zoneScores[record.zoneId] += definition->second <= maximumLevel ? population * 4U + 1U : 1U;
+    }
+    if (zoneScores.empty()) return runtime.monsters().size();
+
+    std::uint16_t selectedZone = 0U;
+    if (const auto requested = forcedZone(); requested.has_value() && zoneScores.contains(*requested)) {
+        selectedZone = *requested;
+    } else {
+        selectedZone = std::max_element(zoneScores.begin(), zoneScores.end(), [](const auto& left, const auto& right) {
+            if (left.second != right.second) return left.second < right.second;
+            return left.first > right.first;
+        })->first;
+    }
+
+    float sourceMaximumX = 1.0F;
+    float sourceMaximumZ = 1.0F;
+    for (const auto& record : table.records()) {
+        if (record.zoneId != selectedZone || record.actType >= 100U || !templateLevels.contains(record.npcId)) continue;
+        sourceMaximumX = std::max(sourceMaximumX, static_cast<float>(std::max({record.leftX, record.rightX, record.limitMinX, record.limitMaxX, 1})));
+        sourceMaximumZ = std::max(sourceMaximumZ, static_cast<float>(std::max({record.topZ, record.bottomZ, record.limitMinZ, record.limitMaxZ, 1})));
+    }
+
+    const float worldWidth = map != nullptr && map->loaded() ? map->width() : 160.0F;
+    const float worldLength = map != nullptr && map->loaded() ? map->length() : 160.0F;
+    const auto mapX = [&](std::int32_t raw) {
+        const float normalized = std::clamp(static_cast<float>(raw) / sourceMaximumX, 0.0F, 1.0F);
+        return (normalized - 0.5F) * worldWidth * 0.94F;
+    };
+    const auto mapZ = [&](std::int32_t raw) {
+        const float normalized = std::clamp(static_cast<float>(raw) / sourceMaximumZ, 0.0F, 1.0F);
+        return (normalized - 0.5F) * worldLength * 0.94F;
+    };
+
+    std::vector<MonsterSpawnPlacement> placements;
+    placements.reserve(96U);
+    const int maximumLevel = std::max(15, runtime.player().level + 12);
+    for (const auto& record : table.records()) {
+        if (record.zoneId != selectedZone || record.actType >= 100U || record.count == 0U) continue;
+        const auto definition = templateLevels.find(record.npcId);
+        if (definition == templateLevels.end() || definition->second > maximumLevel + 15) continue;
+        MonsterSpawnPlacement placement;
+        placement.npcId = record.npcId;
+        placement.minimum = {mapX(std::min(record.leftX, record.rightX)), 0.0F,
+                             mapZ(std::min(record.topZ, record.bottomZ))};
+        placement.maximum = {mapX(std::max(record.leftX, record.rightX)), 0.0F,
+                             mapZ(std::max(record.topZ, record.bottomZ))};
+        placement.count = static_cast<std::uint16_t>(std::clamp<std::size_t>(record.count, 1U, 12U));
+        placements.push_back(placement);
+        if (placements.size() >= 96U) break;
+    }
+    return runtime.replaceWorldSpawns(placements, 192U);
 }
 
 } // namespace
@@ -63,6 +167,14 @@ void OfflineNpcSystem::createShop(const OfflineRuntime& runtime) {
 void OfflineNpcSystem::initialize(OfflineRuntime& runtime, const content::SmdMap* map) {
     createNpcs(map);
     createShop(runtime);
+    if (const auto spawnPath = locateSpawnTable(); spawnPath.has_value()) {
+        try {
+            const std::size_t count = applyCompiledSpawns(runtime, map, *spawnPath);
+            message_ = "OpenKO zone spawns loaded: " + std::to_string(count) + " creatures.";
+        } catch (const std::exception& exception) {
+            message_ = std::string("Spawn data rejected: ") + exception.what();
+        }
+    }
     if (runtime.player().position.x == 0.0F && runtime.player().position.z == 0.0F
         && map != nullptr && !map->regeneEvents().empty()) {
         const auto& regene = map->regeneEvents().front();
