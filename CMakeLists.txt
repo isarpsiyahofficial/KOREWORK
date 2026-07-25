@@ -31,6 +31,7 @@ add_library(korework_content STATIC
     src/content/npc_looks_table.cpp
     src/content/smd_map.cpp
     src/data/game_data_pack.cpp
+    src/data/openko_spawn_table.cpp
     src/data/openko_sql_compiler.cpp
 )
 target_include_directories(korework_content PUBLIC src)
@@ -67,6 +68,8 @@ add_executable(korework_equipment_probe tools/ko_equipment_probe.cpp)
 target_link_libraries(korework_equipment_probe PRIVATE korework_content)
 add_executable(korework_dataset_compiler tools/openko_dataset_compiler.cpp)
 target_link_libraries(korework_dataset_compiler PRIVATE korework_content)
+add_executable(korework_spawn_compiler tools/openko_spawn_compiler.cpp)
+target_link_libraries(korework_spawn_compiler PRIVATE korework_content)
 
 if(MSVC)
     target_compile_options(korework_content PRIVATE /W4 /permissive-)
@@ -75,6 +78,7 @@ if(MSVC)
     target_compile_options(korework_content_probe PRIVATE /W4 /permissive-)
     target_compile_options(korework_equipment_probe PRIVATE /W4 /permissive-)
     target_compile_options(korework_dataset_compiler PRIVATE /W4 /permissive-)
+    target_compile_options(korework_spawn_compiler PRIVATE /W4 /permissive-)
 else()
     target_compile_options(korework_content PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_runtime PRIVATE -Wall -Wextra -Wpedantic)
@@ -82,13 +86,14 @@ else()
     target_compile_options(korework_content_probe PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_equipment_probe PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_dataset_compiler PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(korework_spawn_compiler PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 set_target_properties(korework PROPERTIES
     OUTPUT_NAME "KOREWORK"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
-set_target_properties(korework_content_probe korework_equipment_probe korework_dataset_compiler PROPERTIES
+set_target_properties(korework_content_probe korework_equipment_probe korework_dataset_compiler korework_spawn_compiler PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
@@ -105,6 +110,10 @@ if(BUILD_TESTING)
     add_executable(korework_world_state_smoke tests/world_state_smoke.cpp)
     target_link_libraries(korework_world_state_smoke PRIVATE korework_runtime)
     add_test(NAME quest-shop-healer-state-smoke COMMAND korework_world_state_smoke)
+
+    add_executable(korework_spawn_table_smoke tests/openko_spawn_table_smoke.cpp)
+    target_link_libraries(korework_spawn_table_smoke PRIVATE korework_content)
+    add_test(NAME openko-real-spawn-table-smoke COMMAND korework_spawn_table_smoke)
 
     add_executable(korework_smd_smoke tests/smd_map_smoke.cpp)
     target_link_libraries(korework_smd_smoke PRIVATE korework_content)
@@ -146,6 +155,7 @@ if(BUILD_TESTING)
         korework_runtime_smoke
         korework_profile_runtime_smoke
         korework_world_state_smoke
+        korework_spawn_table_smoke
         korework_smd_smoke
         korework_texture_smoke
         korework_skeleton_smoke
@@ -177,6 +187,7 @@ if(BUILD_TESTING)
     add_dependencies(korework_runtime_smoke
         korework_profile_runtime_smoke
         korework_world_state_smoke
+        korework_spawn_table_smoke
         korework_smd_smoke
         korework_texture_smoke
         korework_skeleton_smoke
@@ -188,6 +199,7 @@ if(BUILD_TESTING)
         korework_npc_looks_smoke
         korework_content_probe
         korework_equipment_probe
+        korework_spawn_compiler
     )
 endif()
 
