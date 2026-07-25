@@ -1,6 +1,6 @@
 status=failed
-run_id=30151422659
-validated_commit=363d28256f6b7b08406672138d03a1de45861966
+run_id=30151468134
+validated_commit=4080b4610e7d8fbd7dbb68983acba3520e82dc58
 branch=integration/complete-offline-fire-drake-v1
 linux=failure
 windows=failure
@@ -10,4 +10,4 @@ openko_monsters=unverified
 openko_drop_tables=unverified
 openko_skills=unverified
 complete_assets_over_100mb=unverified
-generated_utc=2026-07-25T08:39:21Z
+generated_utc=2026-07-25T08:41:07Z
