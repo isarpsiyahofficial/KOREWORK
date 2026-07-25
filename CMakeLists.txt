@@ -46,6 +46,7 @@ target_compile_definitions(korework_runtime PUBLIC KOREWORK_OFFLINE_ONLY=1)
 
 add_executable(korework
     src/main.cpp
+    src/game_application.cpp
     src/client/ko_monster_visual_bank.cpp
     src/client/n3_character_attachment.cpp
     src/client/n3_character_model.cpp
