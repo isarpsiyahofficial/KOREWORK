@@ -42,7 +42,7 @@ jobs:
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
 
       - name: Build full offline client and probes
-        run: cmake --build build --target korework korework_content_probe korework_equipment_probe korework_runtime_smoke korework_smd_smoke korework_texture_smoke korework_skeleton_smoke korework_animation_smoke korework_equipment_smoke
+        run: cmake --build build --target korework korework_content_probe korework_equipment_probe korework_runtime_smoke korework_smd_smoke korework_texture_smoke korework_skeleton_smoke korework_animation_smoke korework_equipment_smoke korework_game_data_smoke korework_animation_player_smoke
 
       - name: Run offline tests
         run: ctest --test-dir build --output-on-failure
@@ -115,7 +115,7 @@ jobs:
 
       - name: Build full offline client and probes
         shell: pwsh
-        run: cmake --build build --config Release --parallel 2 --target korework korework_content_probe korework_equipment_probe korework_runtime_smoke korework_smd_smoke korework_texture_smoke korework_skeleton_smoke korework_animation_smoke korework_equipment_smoke
+        run: cmake --build build --config Release --parallel 2 --target korework korework_content_probe korework_equipment_probe korework_runtime_smoke korework_smd_smoke korework_texture_smoke korework_skeleton_smoke korework_animation_smoke korework_equipment_smoke korework_game_data_smoke korework_animation_player_smoke
 
       - name: Run offline tests
         shell: pwsh
@@ -184,7 +184,9 @@ jobs:
           real_n3_character_chain=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
           real_n3_skeleton=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
           real_n3_animation_metadata=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
+          runtime_n3_animation_state=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
           real_n3_equipment_chain=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
+          sql_free_kopack=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
           real_ntf_texture_decode=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
           generated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
