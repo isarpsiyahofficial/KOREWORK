@@ -1,6 +1,8 @@
 #include "game_application.hpp"
 
 #include "client/ko_monster_visual_bank.hpp"
+#include "client/ko_player_visual.hpp"
+#include "client/offline_skill_vfx.hpp"
 #include "client/smd_terrain.hpp"
 #include "content/asset_catalog.hpp"
 #include "content/smd_map.hpp"
@@ -13,19 +15,23 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace korework {
 namespace {
 
 using client::KoMonsterVisualBank;
+using client::KoPlayerVisual;
 using client::N3AnimationState;
+using client::OfflineSkillVfx;
 using client::SmdTerrainModel;
 using content::KoAssetCatalog;
 using content::SmdMap;
@@ -224,7 +230,7 @@ void drawBar(Rectangle rectangle, float value, float maximum, Color fill, const 
     DrawText(text, static_cast<int>(rectangle.x + 8.0F), static_cast<int>(rectangle.y + 4.0F), 16, RAYWHITE);
 }
 
-void drawPlayer(const OfflineRuntime& runtime, float ground) {
+void drawPlayerFallback(const OfflineRuntime& runtime, float ground) {
     const auto& player = runtime.player();
     const Vector3 base {player.position.x, ground, player.position.z};
     Color tint = classColor(player.playerClass);
@@ -243,6 +249,12 @@ void drawPlayer(const OfflineRuntime& runtime, float ground) {
         DrawCube({base.x + 0.62F, base.y + 1.10F, base.z}, length, 0.08F, 0.13F, color);
     }
     if (player.equipmentItemIds[8] != 0U) DrawCube({base.x - 0.53F, base.y + 1.05F, base.z}, 0.12F, 0.9F, 0.75F, GRAY);
+}
+
+void drawPlayer(KoPlayerVisual& visual, const OfflineRuntime& runtime, float ground) {
+    const Vector3 position {runtime.player().position.x, ground, runtime.player().position.z};
+    if (visual.ready()) visual.draw(position, 2.05F, WHITE);
+    else drawPlayerFallback(runtime, ground);
 }
 
 void drawFallbackMonster(const MonsterState& monster, const MonsterTemplate& definition, float ground) {
@@ -326,7 +338,8 @@ void drawInventory(const OfflineRuntime& runtime, std::size_t selected) {
         const Rectangle row {panel.x + 18.0F, static_cast<float>(y), panel.width - 36.0F, 26.0F};
         DrawRectangleRounded(row, 0.06F, 4, index == selected ? Color{80, 68, 39, 255} : Color{27, 31, 39, 255});
         const auto& entry = runtime.inventory()[index];
-        std::string label = entry.name + (entry.upgradeLevel > 0U ? " +" + std::to_string(entry.upgradeLevel) : "") + " x" + std::to_string(entry.count);
+        const std::string label = entry.name + (entry.upgradeLevel > 0U ? " +" + std::to_string(entry.upgradeLevel) : "")
+            + " x" + std::to_string(entry.count);
         DrawText(label.c_str(), static_cast<int>(row.x + 7.0F), static_cast<int>(row.y + 4.0F), 16, RAYWHITE);
     }
     DrawText("UP/DOWN select | E equip | U upgrade", static_cast<int>(panel.x + 18.0F), static_cast<int>(panel.y + panel.height - 38.0F), 15, GOLD);
@@ -382,6 +395,8 @@ bool runWorld(const ProfileSelection& profile) {
     SmdMap worldMap;
     SmdTerrainModel terrain;
     KoMonsterVisualBank visualBank;
+    KoPlayerVisual playerVisual;
+    OfflineSkillVfx skillVfx;
     std::string status = "Fallback content mode";
 
     const auto assetRoot = locateAssetRoot();
@@ -391,8 +406,10 @@ bool runWorld(const ProfileSelection& profile) {
             const auto mapPath = selectMap(catalog);
             const bool mapReady = mapPath.has_value() && worldMap.load(*mapPath) && terrain.load(worldMap);
             const bool visualsReady = visualBank.initialize(*assetRoot);
+            const bool playerReady = playerVisual.initialize(*assetRoot, profile.character.playerClass);
             status = std::string(mapReady ? "REAL SMD OK" : "SMD FAIL") + " | "
-                + (visualsReady ? "NPC_LOOKS/N3 OK" : "N3 FAIL")
+                + (visualsReady ? "NPC_LOOKS/N3 OK" : "N3 FAIL") + " | "
+                + (playerReady ? "PLAYER N3 " + playerVisual.sourceName() : "PLAYER N3 FAIL")
                 + (mapPath.has_value() ? " | " + mapPath->filename().string() : "");
         } catch (const std::exception& exception) {
             status = std::string("Content error: ") + exception.what();
@@ -414,6 +431,7 @@ bool runWorld(const ProfileSelection& profile) {
         visualBank.preload(modelIds, 48U);
         status += " | Models " + std::to_string(visualBank.loadedCount());
     }
+    (void) playerVisual.setWeapon(runtime.itemRecord(runtime.player().equipmentItemIds[6]));
 
     Camera3D camera {};
     camera.up = {0.0F, 1.0F, 0.0F};
@@ -455,7 +473,8 @@ bool runWorld(const ProfileSelection& profile) {
             if (IsKeyDown(KEY_D)) movement = Vector3Add(movement, right);
             if (IsKeyDown(KEY_A)) movement = Vector3Subtract(movement, right);
         }
-        if (Vector3LengthSqr(movement) > 0.001F) {
+        const bool playerMoved = Vector3LengthSqr(movement) > 0.001F;
+        if (playerMoved) {
             const Vec3 previous = runtime.player().position;
             movement = Vector3Scale(Vector3Normalize(movement), (IsKeyDown(KEY_LEFT_SHIFT) ? 6.0F : 4.0F) * delta);
             runtime.movePlayer({movement.x, 0.0F, movement.z});
@@ -463,8 +482,23 @@ bool runWorld(const ProfileSelection& profile) {
         }
 
         const auto target = runtime.nearestAliveMonster(24.0F);
+        bool playerAttacked = false;
         if (!modal) {
-            for (std::size_t index = 0; index < skillKeys.size(); ++index) if (IsKeyPressed(skillKeys[index])) runtime.useSkill(index, target);
+            for (std::size_t index = 0; index < skillKeys.size(); ++index) {
+                if (!IsKeyPressed(skillKeys[index])) continue;
+                const SkillDefinition skill = runtime.skills()[index];
+                Vec3 source = runtime.player().position;
+                source.y = groundHeight(activeMap, source);
+                Vec3 destination = source;
+                if (target.has_value()) {
+                    destination = runtime.monsters()[*target].position;
+                    destination.y = groundHeight(activeMap, destination);
+                }
+                if (runtime.useSkill(index, target)) {
+                    skillVfx.spawn(skill, runtime.player().playerClass, source, destination);
+                    playerAttacked = skill.damage > 0.0F;
+                }
+            }
         }
         if (!npcSystem.modalOpen() && IsKeyPressed(KEY_I)) {
             inventoryOpen = !inventoryOpen;
@@ -498,6 +532,10 @@ bool runWorld(const ProfileSelection& profile) {
             (void) visualBank.update(runtime.monsterTemplates()[monster.templateIndex].modelId, animation, delta);
         }
 
+        (void) playerVisual.setWeapon(runtime.itemRecord(runtime.player().equipmentItemIds[6]));
+        playerVisual.update(playerAttacked ? N3AnimationState::Attack : playerMoved ? N3AnimationState::Move : N3AnimationState::Idle, delta);
+        skillVfx.update(delta);
+
         const Vec3& player = runtime.player().position;
         const float ground = groundHeight(activeMap, player);
         const float horizontal = std::cos(pitch) * distance;
@@ -511,13 +549,14 @@ bool runWorld(const ProfileSelection& profile) {
         BeginMode3D(camera);
         if (terrain.ready()) terrain.draw(); else drawFallbackEnvironment();
         npcSystem.drawWorld(activeMap);
-        drawPlayer(runtime, ground);
+        drawPlayer(playerVisual, runtime, ground);
         for (std::size_t index = 0; index < runtime.monsters().size(); ++index) {
             const auto& monster = runtime.monsters()[index];
             if (!monster.alive) continue;
             drawMonster(visualBank, monster, runtime.monsterTemplates()[monster.templateIndex],
                         target.has_value() && *target == index, groundHeight(activeMap, monster.position));
         }
+        skillVfx.draw();
         EndMode3D();
         drawHud(runtime, target, inventoryOpen, statsOpen, inventorySelection, status);
         npcSystem.drawUi(runtime);
