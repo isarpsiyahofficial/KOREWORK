@@ -1,4 +1,5 @@
 #include "content/asset_catalog.hpp"
+#include "content/item_basic_table.hpp"
 #include "content/ko_asset_resolver.hpp"
 #include "content/n3_animation.hpp"
 #include "content/n3_character.hpp"
@@ -127,7 +128,7 @@ int main(int argc, char** argv) {
             std::cerr << "N3 character has no populated weighted skin geometry.\n";
             return 14;
         }
-        if (character.parts.front().texturePath.empty()) {
+        if (character.parts.empty() || character.parts.front().texturePath.empty()) {
             std::cerr << "N3 character part has no texture reference.\n";
             return 15;
         }
@@ -136,6 +137,23 @@ int main(int argc, char** argv) {
         if (texture.rgba.size() != static_cast<std::size_t>(texture.width) * static_cast<std::size_t>(texture.height) * 4U) {
             std::cerr << "Decoded Noah texture size is inconsistent.\n";
             return 16;
+        }
+
+        const auto itemTablePath = korework::content::ItemBasicTable::locate(assetRoot);
+        const auto itemTable = korework::content::ItemBasicTable::load(itemTablePath);
+        if (itemTable.items().size() < 100U) {
+            std::cerr << "Encrypted Item_Org table contains too few usable items.\n";
+            return 17;
+        }
+        std::size_t equipmentItems = 0;
+        std::size_t namedItems = 0;
+        for (const auto& item : itemTable.items()) {
+            if (!item.name.empty()) ++namedItems;
+            if (item.appearanceId != 0U && item.slot < 15U) ++equipmentItems;
+        }
+        if (namedItems < 100U || equipmentItems == 0U) {
+            std::cerr << "Encrypted Item_Org table has no usable named equipment records.\n";
+            return 18;
         }
 
         std::cout << "Selected N3 character: " << characterPath->generic_string() << '\n'
@@ -159,7 +177,11 @@ int main(int argc, char** argv) {
                   << "Texture: " << character.parts.front().texturePath.generic_string() << '\n'
                   << "Texture dimensions: " << texture.width << " x " << texture.height << '\n'
                   << "Texture format: " << texture.format << '\n'
-                  << "Texture RGBA bytes: " << texture.rgba.size() << '\n';
+                  << "Texture RGBA bytes: " << texture.rgba.size() << '\n'
+                  << "Item table: " << itemTablePath.generic_string() << '\n'
+                  << "Item rows: " << itemTable.items().size() << '\n'
+                  << "Named item rows: " << namedItems << '\n'
+                  << "Equipment item rows: " << equipmentItems << '\n';
         return 0;
     } catch (const std::exception& exception) {
         std::cerr << "KO content probe failed: " << exception.what() << '\n';
