@@ -115,6 +115,10 @@ if(BUILD_TESTING)
     target_link_libraries(korework_spawn_table_smoke PRIVATE korework_content)
     add_test(NAME openko-real-spawn-table-smoke COMMAND korework_spawn_table_smoke)
 
+    add_executable(korework_runtime_spawn_smoke tests/runtime_spawn_application_smoke.cpp)
+    target_link_libraries(korework_runtime_spawn_smoke PRIVATE korework_runtime)
+    add_test(NAME openko-runtime-spawn-application-smoke COMMAND korework_runtime_spawn_smoke)
+
     add_executable(korework_smd_smoke tests/smd_map_smoke.cpp)
     target_link_libraries(korework_smd_smoke PRIVATE korework_content)
     add_test(NAME fire-drake-smd-smoke COMMAND korework_smd_smoke)
@@ -156,6 +160,7 @@ if(BUILD_TESTING)
         korework_profile_runtime_smoke
         korework_world_state_smoke
         korework_spawn_table_smoke
+        korework_runtime_spawn_smoke
         korework_smd_smoke
         korework_texture_smoke
         korework_skeleton_smoke
@@ -188,6 +193,7 @@ if(BUILD_TESTING)
         korework_profile_runtime_smoke
         korework_world_state_smoke
         korework_spawn_table_smoke
+        korework_runtime_spawn_smoke
         korework_smd_smoke
         korework_texture_smoke
         korework_skeleton_smoke
