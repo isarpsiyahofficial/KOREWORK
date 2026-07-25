@@ -1,4 +1,4 @@
-validated_commit=1a70ade6c78c9f11740eb63f772061a3c1a35bc6
+validated_commit=746495cdeafa8fdeb83789270d469320d6111808
 offline-runtime-smoke=success
 profile-equipment-upgrade-smoke=success
 quest-shop-healer-state-smoke=success
