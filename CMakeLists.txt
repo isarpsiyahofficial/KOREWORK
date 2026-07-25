@@ -126,6 +126,28 @@ if(BUILD_TESTING)
     target_link_libraries(korework_npc_looks_smoke PRIVATE korework_content)
     add_test(NAME encrypted-npc-looks-smoke COMMAND korework_npc_looks_smoke)
 
+    set(KOREWORK_ACCEPTANCE_TEST_TARGETS
+        korework_runtime_smoke
+        korework_smd_smoke
+        korework_texture_smoke
+        korework_skeleton_smoke
+        korework_animation_smoke
+        korework_equipment_smoke
+        korework_game_data_smoke
+        korework_animation_player_smoke
+        korework_sql_compiler_smoke
+        korework_npc_looks_smoke
+    )
+    if(MSVC)
+        foreach(test_target IN LISTS KOREWORK_ACCEPTANCE_TEST_TARGETS)
+            target_compile_options(${test_target} PRIVATE /UNDEBUG)
+        endforeach()
+    else()
+        foreach(test_target IN LISTS KOREWORK_ACCEPTANCE_TEST_TARGETS)
+            target_compile_options(${test_target} PRIVATE -UNDEBUG)
+        endforeach()
+    endif()
+
     add_dependencies(korework_runtime_smoke
         korework_smd_smoke
         korework_texture_smoke
