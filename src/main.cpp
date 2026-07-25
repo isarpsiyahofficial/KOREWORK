@@ -1,7 +1,9 @@
+#include "client/n3_animation_player.hpp"
 #include "client/n3_character_model.hpp"
 #include "client/smd_terrain.hpp"
 #include "content/asset_catalog.hpp"
 #include "content/ko_asset_resolver.hpp"
+#include "content/n3_animation.hpp"
 #include "content/n3_character.hpp"
 #include "content/smd_map.hpp"
 #include "offline_runtime.hpp"
@@ -26,10 +28,13 @@ using korework::MonsterState;
 using korework::MonsterTemplate;
 using korework::OfflineRuntime;
 using korework::Vec3;
+using korework::client::N3AnimationPlayer;
+using korework::client::N3AnimationState;
 using korework::client::N3CharacterModel;
 using korework::client::SmdTerrainModel;
 using korework::content::KoAssetCatalog;
 using korework::content::KoAssetResolver;
+using korework::content::N3AnimationSet;
 using korework::content::N3CharacterLoader;
 using korework::content::SmdMap;
 
@@ -84,6 +89,24 @@ std::optional<std::filesystem::path> selectMap(const KoAssetCatalog& catalog) {
 float groundHeight(const SmdMap* map, const Vec3& position) {
     if (map == nullptr || !map->loaded()) return 0.0F;
     return map->heightAt(position.x + map->width() * 0.5F, position.z + map->length() * 0.5F);
+}
+
+N3AnimationState selectMonsterAnimation(const std::vector<Vec3>& previous,
+                                        const std::vector<MonsterState>& monsters) {
+    bool moving = false;
+    bool attacking = false;
+    const std::size_t count = std::min(previous.size(), monsters.size());
+    for (std::size_t index = 0; index < count; ++index) {
+        const auto& monster = monsters[index];
+        if (!monster.alive) continue;
+        if (monster.attackCooldown > 1.02F) attacking = true;
+        const float dx = monster.position.x - previous[index].x;
+        const float dz = monster.position.z - previous[index].z;
+        if (dx * dx + dz * dz > 0.000001F) moving = true;
+    }
+    if (attacking) return N3AnimationState::Attack;
+    if (moving) return N3AnimationState::Move;
+    return N3AnimationState::Idle;
 }
 
 void drawProgressBar(Rectangle rectangle, float value, float maximum, Color fill, const char* label) {
@@ -242,25 +265,31 @@ int main() {
     SmdMap worldMap;
     SmdTerrainModel terrain;
     N3CharacterModel monsterModel;
+    N3AnimationPlayer monsterAnimation;
     std::string status = "KO asset set bulunamadi; fallback kullaniliyor.";
 
     if (const auto assetRoot = locateAssetRoot(); assetRoot.has_value()) {
         try {
             const auto catalog = KoAssetCatalog::scan(*assetRoot);
             const auto mapPath = selectMap(catalog);
-            bool mapReady = mapPath.has_value() && worldMap.load(*mapPath) && terrain.load(worldMap);
+            const bool mapReady = mapPath.has_value() && worldMap.load(*mapPath) && terrain.load(worldMap);
 
             const KoAssetResolver resolver(*assetRoot / "game");
             const auto characterPath = resolver.findFilename("mob_deruvisy.n3chr");
             bool modelReady = false;
+            bool animationReady = false;
             if (characterPath.has_value()) {
                 const N3CharacterLoader loader(resolver);
                 const auto character = loader.load(*characterPath);
                 modelReady = monsterModel.load(character);
+                if (modelReady && !character.animationPath.empty()) {
+                    animationReady = monsterAnimation.configure(N3AnimationSet::load(character.animationPath));
+                }
             }
 
             status = std::string(mapReady ? "REAL SMD OK" : "SMD FAIL")
                 + " | " + (modelReady ? "REAL N3 MONSTER OK" : "N3 MONSTER FAIL")
+                + " | " + (animationReady ? "REAL N3 ANIM OK" : "N3 ANIM FAIL")
                 + (mapPath.has_value() ? " | " + mapPath->filename().string() : "");
             if (!modelReady && !monsterModel.error().empty()) status += " | " + monsterModel.error();
         } catch (const std::exception& exception) {
@@ -278,6 +307,7 @@ int main() {
     float cameraPitch = 0.42F;
     float cameraDistance = 10.5F;
     bool inventoryOpen = false;
+    bool animationFailureReported = false;
     const std::array<int, 10> skillKeys {KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR, KEY_FIVE, KEY_SIX, KEY_SEVEN, KEY_EIGHT, KEY_NINE, KEY_ZERO};
 
     while (!WindowShouldClose()) {
@@ -305,7 +335,22 @@ int main() {
         for (std::size_t index = 0; index < skillKeys.size(); ++index) if (IsKeyPressed(skillKeys[index])) runtime.useSkill(index, target);
         if (IsKeyPressed(KEY_I)) inventoryOpen = !inventoryOpen;
         if (IsKeyPressed(KEY_F5)) runtime.save();
+
+        std::vector<Vec3> previousMonsterPositions;
+        previousMonsterPositions.reserve(runtime.monsters().size());
+        for (const auto& monster : runtime.monsters()) previousMonsterPositions.push_back(monster.position);
         runtime.update(delta);
+
+        if (monsterModel.ready() && monsterAnimation.ready()) {
+            const N3AnimationState selected = selectMonsterAnimation(previousMonsterPositions, runtime.monsters());
+            const bool restartAttack = selected == N3AnimationState::Attack && monsterAnimation.state() != selected;
+            monsterAnimation.setState(selected, restartAttack);
+            monsterAnimation.update(delta);
+            if (!monsterModel.updateAnimation(monsterAnimation.frame()) && !animationFailureReported) {
+                status += " | N3 SKIN UPDATE FAIL: " + monsterModel.error();
+                animationFailureReported = true;
+            }
+        }
 
         const SmdMap* activeMap = terrain.ready() ? &worldMap : nullptr;
         const Vec3& player = runtime.player().position;
