@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <string>
 
 namespace korework {
 
