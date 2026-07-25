@@ -37,6 +37,7 @@ target_include_directories(korework_content PUBLIC src)
 
 add_library(korework_runtime STATIC
     src/client/n3_animation_player.cpp
+    src/offline_roster.cpp
     src/offline_runtime.cpp
 )
 target_include_directories(korework_runtime PUBLIC src)
