@@ -97,8 +97,10 @@ jobs:
           test "$PACKAGE_BYTES" -gt 100000000
           printf 'asset_bytes=%s\npackage_bytes=%s\n' "$ASSET_BYTES" "$PACKAGE_BYTES" | tee package-linux.txt
           tar -C package -czf KOREWORK-Linux-Complete.tar.gz KOREWORK-Linux
-          tar -tzf KOREWORK-Linux-Complete.tar.gz | grep -Fq 'KOREWORK-Linux/KOREWORK'
-          tar -tzf KOREWORK-Linux-Complete.tar.gz | grep -Fq 'KOREWORK-Linux/data/game_data.kopack'
+          tar -tzf KOREWORK-Linux-Complete.tar.gz > archive-linux.txt
+          grep -Fx 'KOREWORK-Linux/KOREWORK' archive-linux.txt
+          grep -Fx 'KOREWORK-Linux/data/game_data.kopack' archive-linux.txt
+          grep -F 'KOREWORK-Linux/assets/ko/' archive-linux.txt >/dev/null
           test "$(stat -c%s KOREWORK-Linux-Complete.tar.gz)" -gt 100000000
 
       - name: Upload complete Linux package
@@ -117,6 +119,7 @@ jobs:
           path: |
             dataset-linux.txt
             package-linux.txt
+            archive-linux.txt
           if-no-files-found: warn
 
   windows-package:
