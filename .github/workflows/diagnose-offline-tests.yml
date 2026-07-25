@@ -8,12 +8,17 @@ on:
       - '.validation/**'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   diagnose-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -22,11 +27,43 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
           cmake --build build --target korework_runtime_smoke korework_game_data_smoke korework_sql_compiler_smoke korework_animation_player_smoke
-      - name: Runtime smoke
+      - id: runtime
+        name: Runtime smoke
+        continue-on-error: true
         run: build/korework_runtime_smoke
-      - name: KOPACK smoke
+      - id: kopack
+        name: KOPACK smoke
+        continue-on-error: true
         run: build/korework_game_data_smoke
-      - name: SQL compiler smoke
+      - id: sqlcompiler
+        name: SQL compiler smoke
+        continue-on-error: true
         run: build/korework_sql_compiler_smoke
-      - name: Animation player smoke
+      - id: animation
+        name: Animation player smoke
+        continue-on-error: true
         run: build/korework_animation_player_smoke
+      - name: Record diagnostic results
+        if: always() && github.event_name == 'push'
+        env:
+          RUNTIME: ${{ steps.runtime.outcome }}
+          KOPACK: ${{ steps.kopack.outcome }}
+          SQLCOMPILER: ${{ steps.sqlcompiler.outcome }}
+          ANIMATION: ${{ steps.animation.outcome }}
+        run: |
+          mkdir -p .validation
+          cat > .validation/offline-test-diagnostics.txt <<EOF
+          validated_commit=${GITHUB_SHA}
+          runtime=${RUNTIME}
+          kopack=${KOPACK}
+          sql_compiler=${SQLCOMPILER}
+          animation=${ANIMATION}
+          EOF
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add .validation/offline-test-diagnostics.txt
+          git commit -m "Record offline test diagnostics [skip ci]"
+          git push origin HEAD:${GITHUB_REF_NAME}
+      - name: Fail diagnostic gate
+        if: steps.runtime.outcome != 'success' || steps.kopack.outcome != 'success' || steps.sqlcompiler.outcome != 'success' || steps.animation.outcome != 'success'
+        run: exit 1
