@@ -119,6 +119,17 @@ if(BUILD_TESTING)
     add_executable(korework_sql_compiler_smoke tests/openko_sql_compiler_smoke.cpp)
     target_link_libraries(korework_sql_compiler_smoke PRIVATE korework_content)
     add_test(NAME openko-sql-to-kopack-smoke COMMAND korework_sql_compiler_smoke)
+
+    add_dependencies(korework_runtime_smoke
+        korework_smd_smoke
+        korework_texture_smoke
+        korework_skeleton_smoke
+        korework_animation_smoke
+        korework_equipment_smoke
+        korework_game_data_smoke
+        korework_animation_player_smoke
+        korework_sql_compiler_smoke
+    )
 endif()
 
 install(TARGETS korework RUNTIME DESTINATION .)
