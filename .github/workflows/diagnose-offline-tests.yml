@@ -56,6 +56,7 @@ jobs:
             profile-equipment-upgrade-smoke
             quest-shop-healer-state-smoke
             openko-real-spawn-table-smoke
+            openko-runtime-spawn-application-smoke
             fire-drake-smd-smoke
             noah-texture-smoke
             n3-skeleton-smoke
