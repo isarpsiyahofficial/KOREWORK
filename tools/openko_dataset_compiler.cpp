@@ -1,9 +1,40 @@
 #include "content/item_basic_table.hpp"
 #include "data/openko_sql_compiler.hpp"
 
+#include <array>
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <optional>
+
+namespace {
+
+std::optional<std::filesystem::path> locateAssetRoot(int argc,
+                                                      char** argv,
+                                                      const std::filesystem::path& output) {
+    std::array<std::filesystem::path, 7> candidates {
+        argc == 4 ? std::filesystem::path(argv[3]) : std::filesystem::path(),
+        std::filesystem::current_path() / "upstream" / "ko-assets",
+        std::filesystem::current_path() / "assets" / "ko",
+        output.parent_path() / "assets" / "ko",
+        output.parent_path().parent_path() / "assets" / "ko",
+        output.parent_path().parent_path().parent_path() / "upstream" / "ko-assets",
+        output.parent_path().parent_path().parent_path() / "assets" / "ko"
+    };
+
+    std::error_code error;
+    for (const auto& candidate : candidates) {
+        if (candidate.empty()) continue;
+        if (std::filesystem::is_directory(candidate / "game", error)
+            && std::filesystem::is_directory(candidate / "server", error)) {
+            return std::filesystem::weakly_canonical(candidate, error);
+        }
+        error.clear();
+    }
+    return std::nullopt;
+}
+
+} // namespace
 
 int main(int argc, char** argv) {
     if (argc != 3 && argc != 4) {
@@ -17,9 +48,9 @@ int main(int argc, char** argv) {
         auto pack = korework::data::OpenKoSqlCompiler::compile(source);
 
         std::filesystem::path itemTablePath;
-        if (argc == 4) {
-            const std::filesystem::path assetRoot = argv[3];
-            itemTablePath = korework::content::ItemBasicTable::locate(assetRoot);
+        const auto assetRoot = locateAssetRoot(argc, argv, output);
+        if (assetRoot.has_value()) {
+            itemTablePath = korework::content::ItemBasicTable::locate(*assetRoot);
             const auto itemTable = korework::content::ItemBasicTable::load(itemTablePath);
             pack.items = itemTable.items();
             pack.validate();
@@ -33,6 +64,7 @@ int main(int argc, char** argv) {
                   << "Classes: " << pack.classes.size() << '\n'
                   << "Items: " << pack.items.size() << '\n';
         if (!itemTablePath.empty()) std::cout << "Item table: " << itemTablePath.generic_string() << '\n';
+        else std::cout << "Item table: unavailable; placeholder index retained\n";
         std::cout << "Output: " << output.generic_string() << '\n';
         return 0;
     } catch (const std::exception& exception) {
