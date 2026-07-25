@@ -68,6 +68,7 @@ jobs:
             encrypted-npc-looks-smoke
             real-ko-content-probe
             real-ko-equipment-probe
+            real-ko-player-probe
           )
           for test_name in "${tests[@]}"; do
             echo "===== ${test_name} ====="
