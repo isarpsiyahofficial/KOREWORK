@@ -20,6 +20,8 @@ FetchContent_MakeAvailable(raylib)
 
 add_library(korework_content STATIC
     src/content/asset_catalog.cpp
+    src/content/encrypted_table.cpp
+    src/content/item_basic_table.cpp
     src/content/ko_asset_resolver.cpp
     src/content/n3_animation.cpp
     src/content/n3_character.cpp
