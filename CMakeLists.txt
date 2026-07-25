@@ -66,6 +66,8 @@ add_executable(korework_content_probe tools/ko_content_probe.cpp)
 target_link_libraries(korework_content_probe PRIVATE korework_content)
 add_executable(korework_equipment_probe tools/ko_equipment_probe.cpp)
 target_link_libraries(korework_equipment_probe PRIVATE korework_content)
+add_executable(korework_player_probe tools/ko_player_probe.cpp)
+target_link_libraries(korework_player_probe PRIVATE korework_content)
 add_executable(korework_dataset_compiler tools/openko_dataset_compiler.cpp)
 target_link_libraries(korework_dataset_compiler PRIVATE korework_content)
 add_executable(korework_spawn_compiler tools/openko_spawn_compiler.cpp)
@@ -77,6 +79,7 @@ if(MSVC)
     target_compile_options(korework PRIVATE /W4 /permissive-)
     target_compile_options(korework_content_probe PRIVATE /W4 /permissive-)
     target_compile_options(korework_equipment_probe PRIVATE /W4 /permissive-)
+    target_compile_options(korework_player_probe PRIVATE /W4 /permissive-)
     target_compile_options(korework_dataset_compiler PRIVATE /W4 /permissive-)
     target_compile_options(korework_spawn_compiler PRIVATE /W4 /permissive-)
 else()
@@ -85,6 +88,7 @@ else()
     target_compile_options(korework PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_content_probe PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_equipment_probe PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(korework_player_probe PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_dataset_compiler PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_spawn_compiler PRIVATE -Wall -Wextra -Wpedantic)
 endif()
@@ -93,7 +97,7 @@ set_target_properties(korework PROPERTIES
     OUTPUT_NAME "KOREWORK"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
-set_target_properties(korework_content_probe korework_equipment_probe korework_dataset_compiler korework_spawn_compiler PROPERTIES
+set_target_properties(korework_content_probe korework_equipment_probe korework_player_probe korework_dataset_compiler korework_spawn_compiler PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
@@ -187,6 +191,8 @@ if(BUILD_TESTING)
                  COMMAND korework_content_probe "${KOREWORK_REAL_ASSET_ROOT}")
         add_test(NAME real-ko-equipment-probe
                  COMMAND korework_equipment_probe "${KOREWORK_REAL_ASSET_ROOT}")
+        add_test(NAME real-ko-player-probe
+                 COMMAND korework_player_probe "${KOREWORK_REAL_ASSET_ROOT}")
     endif()
 
     add_dependencies(korework_runtime_smoke
@@ -205,6 +211,7 @@ if(BUILD_TESTING)
         korework_npc_looks_smoke
         korework_content_probe
         korework_equipment_probe
+        korework_player_probe
         korework_spawn_compiler
     )
 endif()
