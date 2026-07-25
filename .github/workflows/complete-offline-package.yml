@@ -8,6 +8,10 @@ on:
       - '.validation/**'
   workflow_dispatch:
 
+concurrency:
+  group: complete-offline-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -222,6 +226,11 @@ jobs:
           LINUX_RESULT: ${{ needs.linux-package.result }}
           WINDOWS_RESULT: ${{ needs.windows-package.result }}
         run: |
+          CURRENT_HEAD=$(git rev-parse HEAD)
+          if [[ "$CURRENT_HEAD" != "$GITHUB_SHA" ]]; then
+            echo "Skipping stale validation for $GITHUB_SHA; branch head is $CURRENT_HEAD"
+            exit 0
+          fi
           mkdir -p .validation
           if [[ "$LINUX_RESULT" == "success" && "$WINDOWS_RESULT" == "success" ]]; then STATUS=passed; else STATUS=failed; fi
           cat > .validation/complete-offline-package.txt <<EOF
