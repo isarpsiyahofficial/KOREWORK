@@ -55,6 +55,7 @@ jobs:
             offline-runtime-smoke
             profile-equipment-upgrade-smoke
             quest-shop-healer-state-smoke
+            openko-real-spawn-table-smoke
             fire-drake-smd-smoke
             noah-texture-smoke
             n3-skeleton-smoke
