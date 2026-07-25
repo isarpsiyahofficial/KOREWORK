@@ -77,8 +77,7 @@ jobs:
 
       - name: Validate runtime with generated data
         shell: bash
-        run: |
-          KOREWORK_DATA_PACK="$PWD/package/KOREWORK-Linux/data/game_data.kopack" build/korework_runtime_smoke
+        run: KOREWORK_DATA_PACK="$PWD/package/KOREWORK-Linux/data/game_data.kopack" build/korework_runtime_smoke
 
       - name: Assemble complete Linux package
         shell: bash
@@ -138,6 +137,7 @@ jobs:
           git clone --filter=blob:none --no-checkout https://github.com/Open-KO/OpenKO-db.git upstream/openko-db
           git -C upstream/openko-db checkout "$OPENKO_DB_COMMIT"
           test -d upstream/ko-assets/game
+          test -d upstream/ko-assets/server
           test -s upstream/openko-db/ManualSetup/6_InsertData_K_MONSTER.sql
           test -s upstream/openko-db/ManualSetup/6_InsertData_K_MONSTER_ITEM.sql
           test -s upstream/openko-db/ManualSetup/6_InsertData_MAGIC.sql
@@ -238,14 +238,21 @@ jobs:
           LINUX_RESULT: ${{ needs.linux-package.result }}
           WINDOWS_RESULT: ${{ needs.windows-package.result }}
         run: |
-          CURRENT_HEAD=$(git rev-parse HEAD)
-          if [[ "$CURRENT_HEAD" != "$GITHUB_SHA" ]]; then
-            echo "Skipping stale validation for $GITHUB_SHA; branch head is $CURRENT_HEAD"
-            exit 0
-          fi
-          mkdir -p .validation
-          if [[ "$LINUX_RESULT" == "success" && "$WINDOWS_RESULT" == "success" ]]; then STATUS=passed; else STATUS=failed; fi
-          cat > .validation/complete-offline-package.txt <<EOF
+          set -euo pipefail
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          for attempt in 1 2 3 4; do
+            git fetch origin "$GITHUB_REF_NAME"
+            git reset --hard "origin/$GITHUB_REF_NAME"
+            NON_VALIDATION_CHANGES=$(git diff --name-only "$GITHUB_SHA..HEAD" -- . ':(exclude).validation/**' || true)
+            if [[ -n "$NON_VALIDATION_CHANGES" ]]; then
+              echo "Source changed after $GITHUB_SHA; refusing stale package validation:"
+              echo "$NON_VALIDATION_CHANGES"
+              exit 1
+            fi
+            mkdir -p .validation
+            if [[ "$LINUX_RESULT" == "success" && "$WINDOWS_RESULT" == "success" ]]; then STATUS=passed; else STATUS=failed; fi
+            cat > .validation/complete-offline-package.txt <<EOF
           status=${STATUS}
           run_id=${GITHUB_RUN_ID}
           validated_commit=${GITHUB_SHA}
@@ -261,8 +268,11 @@ jobs:
           complete_assets_over_100mb=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
           generated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git add .validation/complete-offline-package.txt
-          git commit -m "Record complete offline package validation [skip ci]"
-          git push origin HEAD:${GITHUB_REF_NAME}
+            git add .validation/complete-offline-package.txt
+            if git diff --cached --quiet; then exit 0; fi
+            git commit -m "Record complete offline package validation [skip ci]"
+            if git push origin HEAD:"$GITHUB_REF_NAME"; then exit 0; fi
+            echo "Validation push raced on attempt $attempt; retrying"
+          done
+          echo "Unable to record complete package validation after retries"
+          exit 1
