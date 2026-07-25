@@ -60,8 +60,9 @@ jobs:
       - name: Generate SQL-free Fire Drake KOPACK
         shell: bash
         run: |
+          set -o pipefail
           mkdir -p package/KOREWORK-Linux/data package/KOREWORK-Linux/assets
-          build/bin/korework_dataset_compiler upstream/openko-db package/KOREWORK-Linux/data/game_data.kopack | tee dataset-linux.txt
+          build/bin/korework_dataset_compiler upstream/openko-db package/KOREWORK-Linux/data/game_data.kopack 2>&1 | tee dataset-linux.txt
           test -s package/KOREWORK-Linux/data/game_data.kopack
           test "$(stat -c%s package/KOREWORK-Linux/data/game_data.kopack)" -gt 100000
           grep -Eq 'Monsters: [1-9][0-9]{2,}' dataset-linux.txt
@@ -101,13 +102,14 @@ jobs:
           compression-level: 0
 
       - name: Upload Linux validation reports
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: KOREWORK-Linux-Reports
           path: |
             dataset-linux.txt
             package-linux.txt
-          if-no-files-found: error
+          if-no-files-found: warn
 
   windows-package:
     runs-on: windows-2022
@@ -128,6 +130,9 @@ jobs:
           git -C upstream/openko-db checkout "$OPENKO_DB_COMMIT"
           test -d upstream/ko-assets/game
           test -s upstream/openko-db/ManualSetup/6_InsertData_K_MONSTER.sql
+          test -s upstream/openko-db/ManualSetup/6_InsertData_K_MONSTER_ITEM.sql
+          test -s upstream/openko-db/ManualSetup/6_InsertData_MAGIC.sql
+          test -s upstream/openko-db/ManualSetup/6_InsertData_COEFFICIENT.sql
 
       - name: Configure and build
         shell: pwsh
@@ -145,7 +150,8 @@ jobs:
           New-Item -ItemType Directory -Force package/KOREWORK-Windows/data | Out-Null
           New-Item -ItemType Directory -Force package/KOREWORK-Windows/assets/ko | Out-Null
           & build/bin/Release/korework_dataset_compiler.exe upstream/openko-db package/KOREWORK-Windows/data/game_data.kopack 2>&1 | Tee-Object -FilePath dataset-windows.txt
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $compilerExit = $LASTEXITCODE
+          if ($compilerExit -ne 0) { exit $compilerExit }
           $size = (Get-Item package/KOREWORK-Windows/data/game_data.kopack).Length
           if ($size -le 100000) { throw "Generated KOPACK is unexpectedly small: $size" }
           $report = Get-Content dataset-windows.txt -Raw
@@ -188,13 +194,14 @@ jobs:
           compression-level: 0
 
       - name: Upload Windows validation reports
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: KOREWORK-Windows-Reports
           path: |
             dataset-windows.txt
             package-windows.txt
-          if-no-files-found: error
+          if-no-files-found: warn
 
   record-complete-package:
     needs:
