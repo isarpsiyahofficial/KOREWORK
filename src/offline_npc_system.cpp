@@ -3,11 +3,13 @@
 #include "data/openko_spawn_table.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -21,6 +23,13 @@ Color npcColor(OfflineNpcSystem::NpcKind kind) {
         case OfflineNpcSystem::NpcKind::Healer: return Color{76, 139, 181, 255};
     }
     return GRAY;
+}
+
+std::string lower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    return value;
 }
 
 std::optional<std::filesystem::path> locateSpawnTable() {
@@ -53,6 +62,15 @@ std::optional<std::uint16_t> forcedZone() {
     }
 }
 
+std::optional<std::uint16_t> mapZone(const content::SmdMap* map) {
+    if (map == nullptr || !map->loaded()) return std::nullopt;
+    const std::string filename = lower(map->sourcePath().filename().string());
+    if (filename.find("karus") != std::string::npos) return 1U;
+    if (filename.find("elmorad") != std::string::npos) return 2U;
+    if (filename.find("moradon") != std::string::npos) return 21U;
+    return std::nullopt;
+}
+
 std::size_t applyCompiledSpawns(OfflineRuntime& runtime, const content::SmdMap* map,
                                 const std::filesystem::path& spawnPath) {
     const auto table = data::OpenKoSpawnTable::load(spawnPath);
@@ -74,6 +92,8 @@ std::size_t applyCompiledSpawns(OfflineRuntime& runtime, const content::SmdMap* 
     std::uint16_t selectedZone = 0U;
     if (const auto requested = forcedZone(); requested.has_value() && zoneScores.contains(*requested)) {
         selectedZone = *requested;
+    } else if (const auto suggested = mapZone(map); suggested.has_value() && zoneScores.contains(*suggested)) {
+        selectedZone = *suggested;
     } else {
         selectedZone = std::max_element(zoneScores.begin(), zoneScores.end(), [](const auto& left, const auto& right) {
             if (left.second != right.second) return left.second < right.second;
@@ -186,9 +206,16 @@ void OfflineNpcSystem::initialize(OfflineRuntime& runtime, const content::SmdMap
 
 Vec3 OfflineNpcSystem::constrainToMap(const content::SmdMap* map, Vec3 requested, Vec3 fallback) const noexcept {
     if (map == nullptr || !map->loaded()) return requested;
-    const float mapX = requested.x + map->width() * 0.5F;
-    const float mapZ = requested.z + map->length() * 0.5F;
-    return map->contains(mapX, mapZ) ? requested : fallback;
+    const float requestedX = requested.x + map->width() * 0.5F;
+    const float requestedZ = requested.z + map->length() * 0.5F;
+    if (!map->contains(requestedX, requestedZ)) return fallback;
+    const float fallbackX = fallback.x + map->width() * 0.5F;
+    const float fallbackZ = fallback.z + map->length() * 0.5F;
+    const float requestedHeight = map->heightAt(requestedX, requestedZ);
+    const float fallbackHeight = map->heightAt(fallbackX, fallbackZ);
+    if (!std::isfinite(requestedHeight) || !std::isfinite(fallbackHeight)
+        || std::abs(requestedHeight - fallbackHeight) > 2.75F) return fallback;
+    return requested;
 }
 
 void OfflineNpcSystem::findInteraction(const OfflineRuntime& runtime, const content::SmdMap* map) {
