@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(KOREWORKOffline VERSION 0.9.1 LANGUAGES CXX)
+project(KOREWORKOffline VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,20 +20,27 @@ FetchContent_MakeAvailable(raylib)
 
 add_library(korework_content STATIC
     src/content/asset_catalog.cpp
+    src/content/encrypted_table.cpp
+    src/content/item_basic_table.cpp
     src/content/ko_asset_resolver.cpp
     src/content/n3_animation.cpp
     src/content/n3_character.cpp
     src/content/n3_equipment.cpp
     src/content/n3_skeleton.cpp
     src/content/n3_texture.cpp
+    src/content/npc_looks_table.cpp
     src/content/smd_map.cpp
     src/data/game_data_pack.cpp
+    src/data/openko_spawn_table.cpp
+    src/data/openko_sql_compiler.cpp
 )
 target_include_directories(korework_content PUBLIC src)
 
 add_library(korework_runtime STATIC
     src/client/n3_animation_player.cpp
+    src/offline_roster.cpp
     src/offline_runtime.cpp
+    src/offline_world_state.cpp
 )
 target_include_directories(korework_runtime PUBLIC src)
 target_link_libraries(korework_runtime PUBLIC korework_content)
@@ -41,6 +48,11 @@ target_compile_definitions(korework_runtime PUBLIC KOREWORK_OFFLINE_ONLY=1)
 
 add_executable(korework
     src/main.cpp
+    src/game_application.cpp
+    src/offline_npc_system.cpp
+    src/client/ko_monster_visual_bank.cpp
+    src/client/ko_player_visual.cpp
+    src/client/offline_skill_vfx.cpp
     src/client/n3_character_attachment.cpp
     src/client/n3_character_model.cpp
     src/client/n3_equipment_model.cpp
@@ -54,6 +66,12 @@ add_executable(korework_content_probe tools/ko_content_probe.cpp)
 target_link_libraries(korework_content_probe PRIVATE korework_content)
 add_executable(korework_equipment_probe tools/ko_equipment_probe.cpp)
 target_link_libraries(korework_equipment_probe PRIVATE korework_content)
+add_executable(korework_player_probe tools/ko_player_probe.cpp)
+target_link_libraries(korework_player_probe PRIVATE korework_content)
+add_executable(korework_dataset_compiler tools/openko_dataset_compiler.cpp)
+target_link_libraries(korework_dataset_compiler PRIVATE korework_content)
+add_executable(korework_spawn_compiler tools/openko_spawn_compiler.cpp)
+target_link_libraries(korework_spawn_compiler PRIVATE korework_content)
 
 if(MSVC)
     target_compile_options(korework_content PRIVATE /W4 /permissive-)
@@ -61,19 +79,25 @@ if(MSVC)
     target_compile_options(korework PRIVATE /W4 /permissive-)
     target_compile_options(korework_content_probe PRIVATE /W4 /permissive-)
     target_compile_options(korework_equipment_probe PRIVATE /W4 /permissive-)
+    target_compile_options(korework_player_probe PRIVATE /W4 /permissive-)
+    target_compile_options(korework_dataset_compiler PRIVATE /W4 /permissive-)
+    target_compile_options(korework_spawn_compiler PRIVATE /W4 /permissive-)
 else()
     target_compile_options(korework_content PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_runtime PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_content_probe PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_equipment_probe PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(korework_player_probe PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(korework_dataset_compiler PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(korework_spawn_compiler PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 set_target_properties(korework PROPERTIES
     OUTPUT_NAME "KOREWORK"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
-set_target_properties(korework_content_probe korework_equipment_probe PROPERTIES
+set_target_properties(korework_content_probe korework_equipment_probe korework_player_probe korework_dataset_compiler korework_spawn_compiler PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
@@ -82,6 +106,22 @@ if(BUILD_TESTING)
     add_executable(korework_runtime_smoke tests/runtime_smoke.cpp)
     target_link_libraries(korework_runtime_smoke PRIVATE korework_runtime)
     add_test(NAME offline-runtime-smoke COMMAND korework_runtime_smoke)
+
+    add_executable(korework_profile_runtime_smoke tests/profile_runtime_smoke.cpp)
+    target_link_libraries(korework_profile_runtime_smoke PRIVATE korework_runtime)
+    add_test(NAME profile-equipment-upgrade-smoke COMMAND korework_profile_runtime_smoke)
+
+    add_executable(korework_world_state_smoke tests/world_state_smoke.cpp)
+    target_link_libraries(korework_world_state_smoke PRIVATE korework_runtime)
+    add_test(NAME quest-shop-healer-state-smoke COMMAND korework_world_state_smoke)
+
+    add_executable(korework_spawn_table_smoke tests/openko_spawn_table_smoke.cpp)
+    target_link_libraries(korework_spawn_table_smoke PRIVATE korework_content)
+    add_test(NAME openko-real-spawn-table-smoke COMMAND korework_spawn_table_smoke)
+
+    add_executable(korework_runtime_spawn_smoke tests/runtime_spawn_application_smoke.cpp)
+    target_link_libraries(korework_runtime_spawn_smoke PRIVATE korework_runtime)
+    add_test(NAME openko-runtime-spawn-application-smoke COMMAND korework_runtime_spawn_smoke)
 
     add_executable(korework_smd_smoke tests/smd_map_smoke.cpp)
     target_link_libraries(korework_smd_smoke PRIVATE korework_content)
@@ -110,6 +150,70 @@ if(BUILD_TESTING)
     add_executable(korework_animation_player_smoke tests/n3_animation_player_smoke.cpp)
     target_link_libraries(korework_animation_player_smoke PRIVATE korework_runtime)
     add_test(NAME n3-runtime-animation-player-smoke COMMAND korework_animation_player_smoke)
+
+    add_executable(korework_sql_compiler_smoke tests/openko_sql_compiler_smoke.cpp)
+    target_link_libraries(korework_sql_compiler_smoke PRIVATE korework_content)
+    add_test(NAME openko-sql-to-kopack-smoke COMMAND korework_sql_compiler_smoke)
+
+    add_executable(korework_npc_looks_smoke tests/npc_looks_table_smoke.cpp)
+    target_link_libraries(korework_npc_looks_smoke PRIVATE korework_content)
+    add_test(NAME encrypted-npc-looks-smoke COMMAND korework_npc_looks_smoke)
+
+    set(KOREWORK_ACCEPTANCE_TEST_TARGETS
+        korework_runtime_smoke
+        korework_profile_runtime_smoke
+        korework_world_state_smoke
+        korework_spawn_table_smoke
+        korework_runtime_spawn_smoke
+        korework_smd_smoke
+        korework_texture_smoke
+        korework_skeleton_smoke
+        korework_animation_smoke
+        korework_equipment_smoke
+        korework_game_data_smoke
+        korework_animation_player_smoke
+        korework_sql_compiler_smoke
+        korework_npc_looks_smoke
+    )
+    if(MSVC)
+        foreach(test_target IN LISTS KOREWORK_ACCEPTANCE_TEST_TARGETS)
+            target_compile_options(${test_target} PRIVATE /UNDEBUG)
+        endforeach()
+    else()
+        foreach(test_target IN LISTS KOREWORK_ACCEPTANCE_TEST_TARGETS)
+            target_compile_options(${test_target} PRIVATE -UNDEBUG)
+        endforeach()
+    endif()
+
+    set(KOREWORK_REAL_ASSET_ROOT "${CMAKE_SOURCE_DIR}/upstream/ko-assets")
+    if(EXISTS "${KOREWORK_REAL_ASSET_ROOT}/game" AND EXISTS "${KOREWORK_REAL_ASSET_ROOT}/server")
+        add_test(NAME real-ko-content-probe
+                 COMMAND korework_content_probe "${KOREWORK_REAL_ASSET_ROOT}")
+        add_test(NAME real-ko-equipment-probe
+                 COMMAND korework_equipment_probe "${KOREWORK_REAL_ASSET_ROOT}")
+        add_test(NAME real-ko-player-probe
+                 COMMAND korework_player_probe "${KOREWORK_REAL_ASSET_ROOT}")
+    endif()
+
+    add_dependencies(korework_runtime_smoke
+        korework_profile_runtime_smoke
+        korework_world_state_smoke
+        korework_spawn_table_smoke
+        korework_runtime_spawn_smoke
+        korework_smd_smoke
+        korework_texture_smoke
+        korework_skeleton_smoke
+        korework_animation_smoke
+        korework_equipment_smoke
+        korework_game_data_smoke
+        korework_animation_player_smoke
+        korework_sql_compiler_smoke
+        korework_npc_looks_smoke
+        korework_content_probe
+        korework_equipment_probe
+        korework_player_probe
+        korework_spawn_compiler
+    )
 endif()
 
 install(TARGETS korework RUNTIME DESTINATION .)

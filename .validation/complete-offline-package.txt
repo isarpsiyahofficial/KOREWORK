@@ -1,0 +1,15 @@
+status=passed
+run_id=30166301842
+validated_commit=746495cdeafa8fdeb83789270d469320d6111808
+branch=integration/complete-offline-fire-drake-v1
+linux=success
+windows=success
+no_server_runtime=passed
+sql_free_kopack_v2=passed
+openko_monsters=passed
+openko_drop_tables=passed
+openko_skills=passed
+real_item_catalog=passed
+openko_zone_spawns=passed
+complete_assets_over_100mb=passed
+generated_utc=2026-07-25T16:50:57Z

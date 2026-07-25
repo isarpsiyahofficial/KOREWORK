@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -12,6 +13,7 @@ struct MonsterRecord {
     std::uint16_t sid = 0;
     std::string name;
     std::uint32_t modelId = 0;
+    std::uint16_t sizePercent = 100;
     std::uint32_t rightHandItem = 0;
     std::uint32_t leftHandItem = 0;
     std::uint8_t group = 0;
@@ -137,14 +139,25 @@ struct ClassCoefficientRecord {
     float evasionRate = 0.0F;
 };
 
+struct DropEntry {
+    std::uint32_t itemId = 0;
+    std::uint16_t chance = 0; // KO probability scale: 0..10000.
+};
+
+struct DropTableRecord {
+    std::uint32_t id = 0;
+    std::array<DropEntry, 5> entries {};
+};
+
 class GameDataPack final {
 public:
-    static constexpr std::uint32_t CurrentVersion = 1;
+    static constexpr std::uint32_t CurrentVersion = 2;
 
     std::vector<MonsterRecord> monsters;
     std::vector<ItemRecord> items;
     std::vector<SkillRecord> skills;
     std::vector<ClassCoefficientRecord> classes;
+    std::vector<DropTableRecord> dropTables;
 
     void validate() const;
     void save(const std::filesystem::path& path) const;

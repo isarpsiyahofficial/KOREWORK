@@ -18,7 +18,7 @@
 namespace korework::data {
 namespace {
 
-constexpr std::array<char, 8> kMagic {'K', 'O', 'P', 'A', 'C', 'K', '1', '\0'};
+constexpr std::array<char, 8> kMagic {'K', 'O', 'P', 'A', 'C', 'K', '2', '\0'};
 constexpr std::uint32_t kMaximumRecords = 10'000'000;
 constexpr std::uint32_t kMaximumStringBytes = 65'536;
 constexpr std::uint64_t kMaximumPayloadBytes = 4ULL * 1024ULL * 1024ULL * 1024ULL;
@@ -118,7 +118,7 @@ void requireUnique(const std::vector<T>& records, Getter getter, const char* lab
 }
 
 void writeMonster(BufferWriter& writer, const MonsterRecord& record) {
-    writer.value(record.id); writer.value(record.sid); writer.string(record.name); writer.value(record.modelId);
+    writer.value(record.id); writer.value(record.sid); writer.string(record.name); writer.value(record.modelId); writer.value(record.sizePercent);
     writer.value(record.rightHandItem); writer.value(record.leftHandItem); writer.value(record.group); writer.value(record.rank);
     writer.value(record.title); writer.value(record.level); writer.value(record.hp); writer.value(record.mp); writer.value(record.attack);
     writer.value(record.defense); writer.value(record.hitRate); writer.value(record.evasionRate); writer.value(record.damage);
@@ -132,11 +132,12 @@ void writeMonster(BufferWriter& writer, const MonsterRecord& record) {
 MonsterRecord readMonster(BufferReader& reader) {
     MonsterRecord record;
     record.id = reader.value<std::uint32_t>(); record.sid = reader.value<std::uint16_t>(); record.name = reader.string();
-    record.modelId = reader.value<std::uint32_t>(); record.rightHandItem = reader.value<std::uint32_t>();
-    record.leftHandItem = reader.value<std::uint32_t>(); record.group = reader.value<std::uint8_t>(); record.rank = reader.value<std::uint8_t>();
-    record.title = reader.value<std::uint8_t>(); record.level = reader.value<std::uint16_t>(); record.hp = reader.value<std::uint32_t>();
-    record.mp = reader.value<std::uint32_t>(); record.attack = reader.value<std::uint16_t>(); record.defense = reader.value<std::uint16_t>();
-    record.hitRate = reader.value<std::uint16_t>(); record.evasionRate = reader.value<std::uint16_t>(); record.damage = reader.value<std::uint16_t>();
+    record.modelId = reader.value<std::uint32_t>(); record.sizePercent = reader.value<std::uint16_t>();
+    record.rightHandItem = reader.value<std::uint32_t>(); record.leftHandItem = reader.value<std::uint32_t>();
+    record.group = reader.value<std::uint8_t>(); record.rank = reader.value<std::uint8_t>(); record.title = reader.value<std::uint8_t>();
+    record.level = reader.value<std::uint16_t>(); record.hp = reader.value<std::uint32_t>(); record.mp = reader.value<std::uint32_t>();
+    record.attack = reader.value<std::uint16_t>(); record.defense = reader.value<std::uint16_t>(); record.hitRate = reader.value<std::uint16_t>();
+    record.evasionRate = reader.value<std::uint16_t>(); record.damage = reader.value<std::uint16_t>();
     record.attackDelayMs = reader.value<std::uint16_t>(); record.movementSpeed = reader.value<float>(); record.runningSpeed = reader.value<float>();
     record.attackRange = reader.value<float>(); record.searchRange = reader.value<float>(); record.chaseRange = reader.value<float>();
     record.skill1 = reader.value<std::uint32_t>(); record.skill2 = reader.value<std::uint32_t>(); record.skill3 = reader.value<std::uint32_t>();
@@ -224,18 +225,33 @@ ClassCoefficientRecord readClass(BufferReader& reader) {
     return record;
 }
 
+void writeDropTable(BufferWriter& writer, const DropTableRecord& record) {
+    writer.value(record.id);
+    for (const auto& entry : record.entries) { writer.value(entry.itemId); writer.value(entry.chance); }
+}
+
+DropTableRecord readDropTable(BufferReader& reader) {
+    DropTableRecord record;
+    record.id = reader.value<std::uint32_t>();
+    for (auto& entry : record.entries) { entry.itemId = reader.value<std::uint32_t>(); entry.chance = reader.value<std::uint16_t>(); }
+    return record;
+}
+
 } // namespace
 
 void GameDataPack::validate() const {
     static_assert(std::endian::native == std::endian::little, "KOPACK currently requires a little-endian target");
-    requireCount(monsters.size(), "monster"); requireCount(items.size(), "item"); requireCount(skills.size(), "skill"); requireCount(classes.size(), "class");
+    requireCount(monsters.size(), "monster"); requireCount(items.size(), "item"); requireCount(skills.size(), "skill");
+    requireCount(classes.size(), "class"); requireCount(dropTables.size(), "drop table");
     requireUnique(monsters, [](const MonsterRecord& record) { return record.id; }, "monster");
     requireUnique(items, [](const ItemRecord& record) { return record.id; }, "item");
     requireUnique(skills, [](const SkillRecord& record) { return record.id; }, "skill");
     requireUnique(classes, [](const ClassCoefficientRecord& record) { return record.classId; }, "class");
+    requireUnique(dropTables, [](const DropTableRecord& record) { return record.id; }, "drop table");
 
     for (const auto& record : monsters) {
-        if (record.name.empty() || record.name.size() > kMaximumStringBytes || record.level == 0 || record.hp == 0) {
+        if (record.name.empty() || record.name.size() > kMaximumStringBytes || record.level == 0 || record.hp == 0
+            || record.sizePercent == 0 || record.sizePercent > 1000) {
             throw std::runtime_error("Invalid KOPACK monster record: " + std::to_string(record.id));
         }
         requireFinite(record.movementSpeed, "monster movement speed"); requireFinite(record.runningSpeed, "monster running speed");
@@ -266,6 +282,12 @@ void GameDataPack::validate() const {
             if (value < 0.0F || value > 1000.0F) throw std::runtime_error("Invalid KOPACK class coefficient range");
         }
     }
+    for (const auto& table : dropTables) {
+        for (const auto& entry : table.entries) {
+            if (entry.chance > 10'000U) throw std::runtime_error("Invalid KOPACK drop chance");
+            if (entry.itemId == 0U && entry.chance != 0U) throw std::runtime_error("KOPACK drop chance without item");
+        }
+    }
 }
 
 void GameDataPack::save(const std::filesystem::path& path) const {
@@ -275,18 +297,21 @@ void GameDataPack::save(const std::filesystem::path& path) const {
     for (const auto& record : items) writeItem(writer, record);
     for (const auto& record : skills) writeSkill(writer, record);
     for (const auto& record : classes) writeClass(writer, record);
+    for (const auto& record : dropTables) writeDropTable(writer, record);
     const auto& payload = writer.data();
     if (payload.size() > kMaximumPayloadBytes) throw std::runtime_error("KOPACK payload exceeds maximum size");
 
+    if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if (!output) throw std::runtime_error("Unable to create KOPACK file: " + path.string());
     output.write(kMagic.data(), static_cast<std::streamsize>(kMagic.size()));
     const std::uint32_t version = CurrentVersion;
     const std::uint64_t payloadSize = payload.size();
     const std::uint64_t payloadChecksum = checksum(payload);
-    const std::array<std::uint32_t, 4> counts {
+    const std::array<std::uint32_t, 5> counts {
         static_cast<std::uint32_t>(monsters.size()), static_cast<std::uint32_t>(items.size()),
-        static_cast<std::uint32_t>(skills.size()), static_cast<std::uint32_t>(classes.size())
+        static_cast<std::uint32_t>(skills.size()), static_cast<std::uint32_t>(classes.size()),
+        static_cast<std::uint32_t>(dropTables.size())
     };
     output.write(reinterpret_cast<const char*>(&version), sizeof(version));
     output.write(reinterpret_cast<const char*>(&payloadSize), sizeof(payloadSize));
@@ -307,7 +332,7 @@ GameDataPack GameDataPack::load(const std::filesystem::path& path) {
     std::uint32_t version = 0;
     std::uint64_t payloadSize = 0;
     std::uint64_t expectedChecksum = 0;
-    std::array<std::uint32_t, 4> counts {};
+    std::array<std::uint32_t, 5> counts {};
     input.read(reinterpret_cast<char*>(&version), sizeof(version));
     input.read(reinterpret_cast<char*>(&payloadSize), sizeof(payloadSize));
     input.read(reinterpret_cast<char*>(&expectedChecksum), sizeof(expectedChecksum));
@@ -326,11 +351,13 @@ GameDataPack GameDataPack::load(const std::filesystem::path& path) {
 
     BufferReader reader(payload);
     GameDataPack pack;
-    pack.monsters.reserve(counts[0]); pack.items.reserve(counts[1]); pack.skills.reserve(counts[2]); pack.classes.reserve(counts[3]);
+    pack.monsters.reserve(counts[0]); pack.items.reserve(counts[1]); pack.skills.reserve(counts[2]);
+    pack.classes.reserve(counts[3]); pack.dropTables.reserve(counts[4]);
     for (std::uint32_t index = 0; index < counts[0]; ++index) pack.monsters.push_back(readMonster(reader));
     for (std::uint32_t index = 0; index < counts[1]; ++index) pack.items.push_back(readItem(reader));
     for (std::uint32_t index = 0; index < counts[2]; ++index) pack.skills.push_back(readSkill(reader));
     for (std::uint32_t index = 0; index < counts[3]; ++index) pack.classes.push_back(readClass(reader));
+    for (std::uint32_t index = 0; index < counts[4]; ++index) pack.dropTables.push_back(readDropTable(reader));
     if (reader.remaining() != 0U) throw std::runtime_error("Unexpected trailing KOPACK payload bytes");
     pack.validate();
     return pack;

@@ -1,0 +1,312 @@
+name: Complete Offline Fire Drake Package
+
+on:
+  push:
+    branches:
+      - integration/complete-offline-fire-drake-v1
+    paths-ignore:
+      - '.validation/**'
+  workflow_dispatch:
+
+concurrency:
+  group: complete-offline-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  OPENKO_DB_COMMIT: bec619466938d278339c30e5b1a4bff3c9413bab
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+
+jobs:
+  linux-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout KOREWORK
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Fetch pinned KO assets
+        shell: bash
+        run: |
+          git submodule sync -- upstream/ko-assets
+          git submodule update --init --depth 1 upstream/ko-assets
+          test -d upstream/ko-assets/game
+          test -d upstream/ko-assets/server
+
+      - name: Fetch pinned OpenKO database dataset
+        shell: bash
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/Open-KO/OpenKO-db.git upstream/openko-db
+          git -C upstream/openko-db checkout "$OPENKO_DB_COMMIT"
+          test -s upstream/openko-db/ManualSetup/6_InsertData_K_MONSTER.sql
+          test -s upstream/openko-db/ManualSetup/6_InsertData_K_MONSTER_ITEM.sql
+          test -s upstream/openko-db/ManualSetup/6_InsertData_MAGIC.sql
+          test -s upstream/openko-db/ManualSetup/6_InsertData_COEFFICIENT.sql
+          test -s upstream/openko-db/ManualSetup/6_InsertData_K_NPCPOS.sql
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ libasound2-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxcursor-dev libxinerama-dev rsync
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build build --target korework korework_dataset_compiler korework_spawn_compiler korework_runtime_smoke korework_sql_compiler_smoke korework_spawn_table_smoke korework_game_data_smoke
+
+      - name: Run all unit and offline tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Generate SQL-free Fire Drake KOPACK and spawn table
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p package/KOREWORK-Linux/data package/KOREWORK-Linux/assets
+          build/bin/korework_dataset_compiler upstream/openko-db package/KOREWORK-Linux/data/game_data.kopack 2>&1 | tee dataset-linux.txt
+          build/bin/korework_spawn_compiler upstream/openko-db package/KOREWORK-Linux/data/world_spawns.kospawn 2>&1 | tee spawn-linux.txt
+          test -s package/KOREWORK-Linux/data/game_data.kopack
+          test -s package/KOREWORK-Linux/data/world_spawns.kospawn
+          test "$(stat -c%s package/KOREWORK-Linux/data/game_data.kopack)" -gt 100000
+          test "$(stat -c%s package/KOREWORK-Linux/data/world_spawns.kospawn)" -gt 10000
+          grep -Eq 'Monsters: [1-9][0-9]{2,}' dataset-linux.txt
+          grep -Eq 'Drop tables: [1-9][0-9]{2,}' dataset-linux.txt
+          grep -Eq 'Skills: [1-9][0-9]{2,}' dataset-linux.txt
+          grep -Eq 'Items: [1-9][0-9]{2,}' dataset-linux.txt
+          grep -Fq 'Item table:' dataset-linux.txt
+          grep -Eq 'Spawns: [1-9][0-9]{2,}' spawn-linux.txt
+          grep -Eq 'Monster spawn rows: [1-9][0-9]{2,}' spawn-linux.txt
+          grep -Eq 'Zones: [1-9][0-9]*' spawn-linux.txt
+
+      - name: Validate runtime with generated data
+        shell: bash
+        run: |
+          KOREWORK_DATA_PACK="$PWD/package/KOREWORK-Linux/data/game_data.kopack" \
+          KOREWORK_SPAWN_TABLE="$PWD/package/KOREWORK-Linux/data/world_spawns.kospawn" \
+          build/korework_runtime_smoke
+          build/bin/korework_spawn_compiler upstream/openko-db spawn-roundtrip.kospawn >/dev/null
+          cmp package/KOREWORK-Linux/data/world_spawns.kospawn spawn-roundtrip.kospawn
+
+      - name: Assemble complete Linux package
+        shell: bash
+        run: |
+          install -m 755 build/bin/KOREWORK package/KOREWORK-Linux/KOREWORK
+          rsync -a --exclude='.git' upstream/ko-assets/ package/KOREWORK-Linux/assets/ko/
+          cat > package/KOREWORK-Linux/README.txt <<'EOF'
+          KOREWORK Offline Fire Drake
+          - No login server, game server, AI server, SQL server or localhost service.
+          - Run ./KOREWORK from this directory.
+          - data/game_data.kopack contains compiled OpenKO monster, drop, skill, class and real Item_Org data.
+          - data/world_spawns.kospawn contains compiled OpenKO K_NPCPOS zone and creature placements.
+          - assets/ko contains the pinned KO map/model/animation/effect asset tree.
+          EOF
+          ASSET_BYTES=$(du -sb package/KOREWORK-Linux/assets/ko | cut -f1)
+          PACKAGE_BYTES=$(du -sb package/KOREWORK-Linux | cut -f1)
+          test "$ASSET_BYTES" -gt 100000000
+          test "$PACKAGE_BYTES" -gt 100000000
+          printf 'asset_bytes=%s\npackage_bytes=%s\n' "$ASSET_BYTES" "$PACKAGE_BYTES" | tee package-linux.txt
+          tar -C package -czf KOREWORK-Linux-Complete.tar.gz KOREWORK-Linux
+          tar -tzf KOREWORK-Linux-Complete.tar.gz > archive-linux.txt
+          grep -Fx 'KOREWORK-Linux/KOREWORK' archive-linux.txt
+          grep -Fx 'KOREWORK-Linux/data/game_data.kopack' archive-linux.txt
+          grep -Fx 'KOREWORK-Linux/data/world_spawns.kospawn' archive-linux.txt
+          grep -F 'KOREWORK-Linux/assets/ko/' archive-linux.txt >/dev/null
+          test "$(stat -c%s KOREWORK-Linux-Complete.tar.gz)" -gt 100000000
+
+      - name: Upload complete Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: KOREWORK-Linux-Complete
+          path: KOREWORK-Linux-Complete.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload Linux validation reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: KOREWORK-Linux-Reports
+          path: |
+            dataset-linux.txt
+            spawn-linux.txt
+            package-linux.txt
+            archive-linux.txt
+          if-no-files-found: warn
+
+  windows-package:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Checkout KOREWORK
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Fetch pinned KO assets and OpenKO database
+        shell: bash
+        run: |
+          git submodule sync -- upstream/ko-assets
+          git submodule update --init --depth 1 upstream/ko-assets
+          git clone --filter=blob:none --no-checkout https://github.com/Open-KO/OpenKO-db.git upstream/openko-db
+          git -C upstream/openko-db checkout "$OPENKO_DB_COMMIT"
+          test -d upstream/ko-assets/game
+          test -d upstream/ko-assets/server
+          test -s upstream/openko-db/ManualSetup/6_InsertData_K_MONSTER.sql
+          test -s upstream/openko-db/ManualSetup/6_InsertData_K_MONSTER_ITEM.sql
+          test -s upstream/openko-db/ManualSetup/6_InsertData_MAGIC.sql
+          test -s upstream/openko-db/ManualSetup/6_InsertData_COEFFICIENT.sql
+          test -s upstream/openko-db/ManualSetup/6_InsertData_K_NPCPOS.sql
+
+      - name: Configure and build
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON
+          cmake --build build --config Release --parallel 2 --target korework korework_dataset_compiler korework_spawn_compiler korework_runtime_smoke korework_sql_compiler_smoke korework_spawn_table_smoke korework_game_data_smoke
+
+      - name: Run all unit and offline tests
+        shell: pwsh
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Generate SQL-free Fire Drake KOPACK and spawn table
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force package/KOREWORK-Windows/data | Out-Null
+          New-Item -ItemType Directory -Force package/KOREWORK-Windows/assets/ko | Out-Null
+          & build/bin/Release/korework_dataset_compiler.exe upstream/openko-db package/KOREWORK-Windows/data/game_data.kopack 2>&1 | Tee-Object -FilePath dataset-windows.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & build/bin/Release/korework_spawn_compiler.exe upstream/openko-db package/KOREWORK-Windows/data/world_spawns.kospawn 2>&1 | Tee-Object -FilePath spawn-windows.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $packSize = (Get-Item package/KOREWORK-Windows/data/game_data.kopack).Length
+          $spawnSize = (Get-Item package/KOREWORK-Windows/data/world_spawns.kospawn).Length
+          if ($packSize -le 100000 -or $spawnSize -le 10000) { throw "Generated game data is unexpectedly small" }
+          $report = Get-Content dataset-windows.txt -Raw
+          foreach ($pattern in @('Monsters: [1-9][0-9]{2,}', 'Drop tables: [1-9][0-9]{2,}', 'Skills: [1-9][0-9]{2,}', 'Items: [1-9][0-9]{2,}', 'Item table:')) {
+            if ($report -notmatch $pattern) { throw "Missing dataset count or source: $pattern" }
+          }
+          $spawnReport = Get-Content spawn-windows.txt -Raw
+          foreach ($pattern in @('Spawns: [1-9][0-9]{2,}', 'Monster spawn rows: [1-9][0-9]{2,}', 'Zones: [1-9][0-9]*')) {
+            if ($spawnReport -notmatch $pattern) { throw "Missing spawn count: $pattern" }
+          }
+
+      - name: Validate runtime with generated data
+        shell: pwsh
+        run: |
+          $env:KOREWORK_DATA_PACK = (Resolve-Path package/KOREWORK-Windows/data/game_data.kopack)
+          $env:KOREWORK_SPAWN_TABLE = (Resolve-Path package/KOREWORK-Windows/data/world_spawns.kospawn)
+          & build/Release/korework_runtime_smoke.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & build/bin/Release/korework_spawn_compiler.exe upstream/openko-db spawn-roundtrip.kospawn | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-FileHash package/KOREWORK-Windows/data/world_spawns.kospawn).Hash -ne (Get-FileHash spawn-roundtrip.kospawn).Hash) {
+            throw "Spawn compiler output is not deterministic"
+          }
+
+      - name: Assemble complete Windows package
+        shell: pwsh
+        run: |
+          Copy-Item build/bin/Release/KOREWORK.exe package/KOREWORK-Windows/KOREWORK.exe
+          robocopy upstream/ko-assets package/KOREWORK-Windows/assets/ko /E /XD .git | Out-Host
+          if ($LASTEXITCODE -ge 8) { exit $LASTEXITCODE }
+          @'
+          KOREWORK Offline Fire Drake
+          - No login server, game server, AI server, SQL server or localhost service.
+          - Run KOREWORK.exe from this directory.
+          - data/game_data.kopack contains compiled OpenKO monster, drop, skill, class and real Item_Org data.
+          - data/world_spawns.kospawn contains compiled OpenKO K_NPCPOS zone and creature placements.
+          - assets/ko contains the pinned KO map/model/animation/effect asset tree.
+          '@ | Set-Content package/KOREWORK-Windows/README.txt
+          $assetBytes = (Get-ChildItem package/KOREWORK-Windows/assets/ko -Recurse -File | Measure-Object Length -Sum).Sum
+          $packageBytes = (Get-ChildItem package/KOREWORK-Windows -Recurse -File | Measure-Object Length -Sum).Sum
+          if ($assetBytes -le 100000000 -or $packageBytes -le 100000000) { throw "Complete package is unexpectedly small" }
+          "asset_bytes=$assetBytes`npackage_bytes=$packageBytes" | Tee-Object -FilePath package-windows.txt
+          & tar.exe -a -c -f KOREWORK-Windows-Complete.zip -C package KOREWORK-Windows
+          if ($LASTEXITCODE -ne 0) { throw "tar.exe failed with exit code $LASTEXITCODE" }
+          if ((Get-Item KOREWORK-Windows-Complete.zip).Length -le 100000000) { throw "Windows ZIP is unexpectedly small" }
+          $archiveEntries = & tar.exe -tf KOREWORK-Windows-Complete.zip
+          if ($LASTEXITCODE -ne 0) { throw "Unable to list Windows ZIP" }
+          foreach ($required in @('KOREWORK-Windows/KOREWORK.exe', 'KOREWORK-Windows/data/game_data.kopack', 'KOREWORK-Windows/data/world_spawns.kospawn', 'KOREWORK-Windows/assets/ko/')) {
+            if (-not ($archiveEntries | Where-Object { $_ -like "$required*" })) { throw "Windows ZIP missing $required" }
+          }
+
+      - name: Upload complete Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: KOREWORK-Windows-Complete
+          path: KOREWORK-Windows-Complete.zip
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload Windows validation reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: KOREWORK-Windows-Reports
+          path: |
+            dataset-windows.txt
+            spawn-windows.txt
+            package-windows.txt
+          if-no-files-found: warn
+
+  record-complete-package:
+    needs:
+      - linux-package
+      - windows-package
+    runs-on: ubuntu-latest
+    if: ${{ always() && github.event_name == 'push' }}
+    steps:
+      - name: Checkout validated branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Record complete-package result
+        shell: bash
+        env:
+          LINUX_RESULT: ${{ needs.linux-package.result }}
+          WINDOWS_RESULT: ${{ needs.windows-package.result }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          for attempt in 1 2 3 4; do
+            git fetch origin "$GITHUB_REF_NAME"
+            git reset --hard "origin/$GITHUB_REF_NAME"
+            NON_VALIDATION_CHANGES=$(git diff --name-only "$GITHUB_SHA..HEAD" -- . ':(exclude).validation/**' || true)
+            if [[ -n "$NON_VALIDATION_CHANGES" ]]; then
+              echo "Source changed after $GITHUB_SHA; refusing stale package validation:"
+              echo "$NON_VALIDATION_CHANGES"
+              exit 1
+            fi
+            mkdir -p .validation
+            if [[ "$LINUX_RESULT" == "success" && "$WINDOWS_RESULT" == "success" ]]; then STATUS=passed; else STATUS=failed; fi
+            cat > .validation/complete-offline-package.txt <<EOF
+          status=${STATUS}
+          run_id=${GITHUB_RUN_ID}
+          validated_commit=${GITHUB_SHA}
+          branch=${GITHUB_REF_NAME}
+          linux=${LINUX_RESULT}
+          windows=${WINDOWS_RESULT}
+          no_server_runtime=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
+          sql_free_kopack_v2=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
+          openko_monsters=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
+          openko_drop_tables=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
+          openko_skills=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
+          real_item_catalog=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
+          openko_zone_spawns=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
+          complete_assets_over_100mb=$([[ "$STATUS" == "passed" ]] && echo passed || echo unverified)
+          generated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+            git add .validation/complete-offline-package.txt
+            if git diff --cached --quiet; then exit 0; fi
+            git commit -m "Record complete offline package validation [skip ci]"
+            if git push origin HEAD:"$GITHUB_REF_NAME"; then exit 0; fi
+            echo "Validation push raced on attempt $attempt; retrying"
+          done
+          echo "Unable to record complete package validation after retries"
+          exit 1
