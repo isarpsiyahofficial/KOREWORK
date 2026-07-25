@@ -1,7 +1,7 @@
 status=failed
-run_id=30143771814
+run_id=30143836258
 run_attempt=1
-validated_commit=b000b8dcf019d2ee8d0b38a39624d9f358407b53
+validated_commit=002e96183a1eac6cd8013a64135aac08e369ff39
 branch=integration/runtime-animation-state-v1
 linux=failure
 windows=failure
@@ -11,4 +11,4 @@ real_n3_skeleton=unverified
 real_n3_animation_metadata=unverified
 real_n3_equipment_chain=unverified
 real_ntf_texture_decode=unverified
-generated_utc=2026-07-25T04:19:52Z
+generated_utc=2026-07-25T04:22:16Z
