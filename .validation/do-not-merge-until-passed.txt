@@ -1,0 +1,5 @@
+DO NOT MERGE OR LABEL COMPLETE UNTIL:
+- .validation/complete-offline-package.txt says status=passed
+- validated_commit equals the branch head
+- linux=success and windows=success
+- all acceptance scope checks are verified on that commit
