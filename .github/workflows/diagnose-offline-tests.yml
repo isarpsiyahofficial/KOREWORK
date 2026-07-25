@@ -11,59 +11,97 @@ on:
 permissions:
   contents: write
 
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+
 jobs:
   diagnose-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: false
+
+      - name: Fetch pinned KO assets
+        run: |
+          git submodule sync -- upstream/ko-assets
+          git submodule update --init --depth 1 upstream/ko-assets
+          test -d upstream/ko-assets/game
+          test -d upstream/ko-assets/server
+
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build g++ libasound2-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxcursor-dev libxinerama-dev
-      - name: Configure and build tests
+
+      - name: Configure and build all acceptance tests
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-          cmake --build build --target korework_runtime_smoke korework_game_data_smoke korework_sql_compiler_smoke korework_animation_player_smoke
-      - id: runtime
-        name: Runtime smoke
-        continue-on-error: true
-        run: build/korework_runtime_smoke
-      - id: kopack
-        name: KOPACK smoke
-        continue-on-error: true
-        run: build/korework_game_data_smoke
-      - id: sqlcompiler
-        name: SQL compiler smoke
-        continue-on-error: true
-        run: build/korework_sql_compiler_smoke
-      - id: animation
-        name: Animation player smoke
-        continue-on-error: true
-        run: build/korework_animation_player_smoke
+          cmake --build build
+
+      - name: Run every acceptance test independently
+        id: tests
+        shell: bash
+        run: |
+          set +e
+          mkdir -p .validation
+          : > .validation/offline-test-diagnostics.txt
+          : > .validation/offline-test-failures.txt
+          echo "validated_commit=${GITHUB_SHA}" >> .validation/offline-test-diagnostics.txt
+          failed=0
+          tests=(
+            offline-runtime-smoke
+            profile-equipment-upgrade-smoke
+            quest-shop-healer-state-smoke
+            fire-drake-smd-smoke
+            noah-texture-smoke
+            n3-skeleton-smoke
+            n3-animation-smoke
+            n3-equipment-smoke
+            sql-free-game-data-pack-smoke
+            n3-runtime-animation-player-smoke
+            openko-sql-to-kopack-smoke
+            encrypted-npc-looks-smoke
+            real-ko-content-probe
+            real-ko-equipment-probe
+          )
+          for test_name in "${tests[@]}"; do
+            echo "===== ${test_name} ====="
+            ctest --test-dir build -C Release -R "^${test_name}$" --output-on-failure 2>&1 | tee test-output.txt
+            status=${PIPESTATUS[0]}
+            if [[ ${status} -eq 0 ]]; then
+              echo "${test_name}=success" >> .validation/offline-test-diagnostics.txt
+            else
+              echo "${test_name}=failure" >> .validation/offline-test-diagnostics.txt
+              {
+                echo "===== ${test_name} ====="
+                cat test-output.txt
+              } >> .validation/offline-test-failures.txt
+              failed=1
+            fi
+          done
+          echo "failed=${failed}" >> .validation/offline-test-diagnostics.txt
+          exit ${failed}
+
       - name: Record diagnostic results
         if: always() && github.event_name == 'push'
-        env:
-          RUNTIME: ${{ steps.runtime.outcome }}
-          KOPACK: ${{ steps.kopack.outcome }}
-          SQLCOMPILER: ${{ steps.sqlcompiler.outcome }}
-          ANIMATION: ${{ steps.animation.outcome }}
         run: |
-          mkdir -p .validation
-          cat > .validation/offline-test-diagnostics.txt <<EOF
-          validated_commit=${GITHUB_SHA}
-          runtime=${RUNTIME}
-          kopack=${KOPACK}
-          sql_compiler=${SQLCOMPILER}
-          animation=${ANIMATION}
-          EOF
           git config user.name github-actions
           git config user.email github-actions@github.com
-          git add .validation/offline-test-diagnostics.txt
-          git commit -m "Record offline test diagnostics [skip ci]"
-          git push origin HEAD:${GITHUB_REF_NAME}
-      - name: Fail diagnostic gate
-        if: steps.runtime.outcome != 'success' || steps.kopack.outcome != 'success' || steps.sqlcompiler.outcome != 'success' || steps.animation.outcome != 'success'
-        run: exit 1
+          git add .validation/offline-test-diagnostics.txt .validation/offline-test-failures.txt
+          if ! git diff --cached --quiet; then
+            git commit -m "Record complete offline test diagnostics [skip ci]"
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
+
+      - name: Upload diagnostic reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KOREWORK-Offline-Test-Diagnostics
+          path: |
+            .validation/offline-test-diagnostics.txt
+            .validation/offline-test-failures.txt
+          if-no-files-found: error
