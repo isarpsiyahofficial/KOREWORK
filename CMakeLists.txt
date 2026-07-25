@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(KOREWORKOffline VERSION 0.9.0 LANGUAGES CXX)
+project(KOREWORKOffline VERSION 0.9.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -41,7 +41,9 @@ target_compile_definitions(korework_runtime PUBLIC KOREWORK_OFFLINE_ONLY=1)
 
 add_executable(korework
     src/main.cpp
+    src/client/n3_character_attachment.cpp
     src/client/n3_character_model.cpp
+    src/client/n3_equipment_model.cpp
     src/client/smd_terrain.cpp
 )
 target_include_directories(korework PRIVATE src)
