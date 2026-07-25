@@ -51,6 +51,7 @@ add_executable(korework
     src/offline_npc_system.cpp
     src/client/ko_monster_visual_bank.cpp
     src/client/ko_player_visual.cpp
+    src/client/offline_skill_vfx.cpp
     src/client/n3_character_attachment.cpp
     src/client/n3_character_model.cpp
     src/client/n3_equipment_model.cpp
