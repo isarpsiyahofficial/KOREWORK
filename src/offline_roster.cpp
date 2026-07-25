@@ -123,8 +123,11 @@ bool OfflineRoster::create(std::size_t slotIndex, std::string name, PlayerClass 
 bool OfflineRoster::remove(std::size_t slotIndex) {
     if (slotIndex >= slots_.size() || !slots_[slotIndex].occupied) return false;
     slots_[slotIndex] = {};
+    const auto root = storageRoot();
     std::error_code error;
-    std::filesystem::remove(storageRoot() / ("offline_profile_" + std::to_string(slotIndex) + ".kosave"), error);
+    std::filesystem::remove(root / ("offline_profile_" + std::to_string(slotIndex) + ".kosave"), error);
+    error.clear();
+    std::filesystem::remove(root / ("offline_world_" + std::to_string(slotIndex) + ".koworld"), error);
     return save();
 }
 
