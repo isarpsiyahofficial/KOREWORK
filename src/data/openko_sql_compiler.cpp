@@ -10,7 +10,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace korework::data {
@@ -189,7 +188,7 @@ void compileMonsters(GameDataPack& pack, const std::filesystem::path& root) {
         record.sid = unsignedValue<std::uint16_t>(row, 0);
         record.name = cleanSqlString(row[1]);
         record.modelId = unsignedValue<std::uint32_t>(row, 2);
-        record.sizePercent = std::clamp<unsignedValue<std::uint16_t>(row, 3), 1U, 1000U);
+        record.sizePercent = std::clamp<std::uint16_t>(unsignedValue<std::uint16_t>(row, 3), 1U, 1000U);
         record.rightHandItem = unsignedValue<std::uint32_t>(row, 4);
         record.leftHandItem = unsignedValue<std::uint32_t>(row, 5);
         record.group = unsignedValue<std::uint8_t>(row, 6);
