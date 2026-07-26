@@ -23,14 +23,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! -f .visual-rework-payload.b64 ]]; then
+          shopt -s nullglob
+          parts=(.visual-rework-payload.part-*)
+          if (( ${#parts[@]} == 0 )); then
             echo 'No visual rework payload to apply.'
             exit 0
           fi
-          base64 --decode .visual-rework-payload.b64 > "$RUNNER_TEMP/visual-rework.tar.gz"
+          cat "${parts[@]}" | base64 --decode > "$RUNNER_TEMP/visual-rework.tar.gz"
           echo '4981687416ab7383305dcbc23851aec6cb8cea49d1c45454ed1669049d08a596  '"$RUNNER_TEMP/visual-rework.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/visual-rework.tar.gz" -C .
-          rm .visual-rework-payload.b64
+          rm "${parts[@]}"
           git config user.name github-actions
           git config user.email github-actions@github.com
           git add -A
