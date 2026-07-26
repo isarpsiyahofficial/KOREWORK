@@ -19,12 +19,19 @@ jobs:
         with:
           fetch-depth: 1
           submodules: false
-      - name: Create source snapshot
+      - name: Fetch pinned raylib source
+        run: |
+          git clone --depth 1 --branch 5.0 https://github.com/raysan5/raylib.git "$RUNNER_TEMP/raylib"
+          rm -rf "$RUNNER_TEMP/raylib/.git"
+      - name: Create source snapshots
         run: |
           tar --exclude='.git' --exclude='upstream' --exclude='build' \
             -czf "$RUNNER_TEMP/KOREWORK-source-snapshot.tar.gz" .
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/raylib-5.0-source.tar.gz" raylib
       - uses: actions/upload-artifact@v4
         with:
           name: KOREWORK-Visual-Rework-Source
-          path: ${{ runner.temp }}/KOREWORK-source-snapshot.tar.gz
+          path: |
+            ${{ runner.temp }}/KOREWORK-source-snapshot.tar.gz
+            ${{ runner.temp }}/raylib-5.0-source.tar.gz
           compression-level: 0
