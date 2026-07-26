@@ -1,9 +1,6 @@
 name: Export Visual Rework Source
 
 on:
-  push:
-    branches:
-      - fix/fire-drake-visual-authenticity-v1
   pull_request:
     branches:
       - main
@@ -13,11 +10,12 @@ permissions:
 
 jobs:
   apply-payload:
-    if: ${{ github.event_name == 'push' }}
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
       - name: Apply locally validated source payload
         shell: bash
@@ -37,14 +35,16 @@ jobs:
           git config user.email github-actions@github.com
           git add -A
           git commit -m 'Rebuild authentic Fire Drake character selection visuals'
-          git push origin HEAD:${GITHUB_REF_NAME}
+          git push origin HEAD:${GITHUB_HEAD_REF}
 
   export:
-    if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, 'Rebuild authentic Fire Drake character selection visuals') }}
+    needs: apply-payload
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.head_ref }}
           fetch-depth: 1
           submodules: false
       - name: Fetch and build pinned raylib
