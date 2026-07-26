@@ -1,0 +1,86 @@
+name: Publish Offline Package Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-offline-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  WINDOWS_ARTIFACT_ID: '8621702792'
+  LINUX_ARTIFACT_ID: '8621692294'
+  RELEASE_TAG: offline-fire-drake-v1
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download validated Windows and Linux artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 5 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${WINDOWS_ARTIFACT_ID}/zip" \
+            --output windows-artifact.zip
+          curl --fail --location --retry 5 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${LINUX_ARTIFACT_ID}/zip" \
+            --output linux-artifact.zip
+          mkdir windows-artifact linux-artifact
+          unzip -q windows-artifact.zip -d windows-artifact
+          unzip -q linux-artifact.zip -d linux-artifact
+          cp windows-artifact/KOREWORK-Windows-Complete.zip ./KOREWORK-Windows-Complete.zip
+          cp linux-artifact/KOREWORK-Linux-Complete.tar.gz ./KOREWORK-Linux-Complete.tar.gz
+
+      - name: Verify release archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(stat -c%s KOREWORK-Windows-Complete.zip)" -gt 100000000
+          test "$(stat -c%s KOREWORK-Linux-Complete.tar.gz)" -gt 100000000
+          unzip -tq KOREWORK-Windows-Complete.zip
+          tar -tzf KOREWORK-Linux-Complete.tar.gz > linux-archive.txt
+          unzip -Z1 KOREWORK-Windows-Complete.zip > windows-archive.txt
+          grep -Fx 'KOREWORK-Windows/KOREWORK.exe' windows-archive.txt
+          grep -Fx 'KOREWORK-Windows/data/game_data.kopack' windows-archive.txt
+          grep -Fx 'KOREWORK-Windows/data/world_spawns.kospawn' windows-archive.txt
+          grep -Fx 'KOREWORK-Linux/KOREWORK' linux-archive.txt
+          grep -Fx 'KOREWORK-Linux/data/game_data.kopack' linux-archive.txt
+          grep -Fx 'KOREWORK-Linux/data/world_spawns.kospawn' linux-archive.txt
+          sha256sum KOREWORK-Windows-Complete.zip KOREWORK-Linux-Complete.tar.gz | tee SHA256SUMS.txt
+
+      - name: Create or update public GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" \
+              KOREWORK-Windows-Complete.zip \
+              KOREWORK-Linux-Complete.tar.gz \
+              SHA256SUMS.txt \
+              --clobber \
+              --repo "${GITHUB_REPOSITORY}"
+          else
+            gh release create "${RELEASE_TAG}" \
+              KOREWORK-Windows-Complete.zip \
+              KOREWORK-Linux-Complete.tar.gz \
+              SHA256SUMS.txt \
+              --target main \
+              --title "KOREWORK Offline Fire Drake v1" \
+              --notes "Validated Windows and Linux offline packages. Includes executable, SQL-free KOPACK, KOSPAWN and the complete KO asset tree." \
+              --latest \
+              --repo "${GITHUB_REPOSITORY}"
+          fi
