@@ -1,0 +1,6 @@
+status=passed
+release_tag=offline-fire-drake-v1
+windows_url=https://github.com/isarpsiyahofficial/KOREWORK/releases/download/offline-fire-drake-v1/KOREWORK-Windows-Complete.zip
+linux_url=https://github.com/isarpsiyahofficial/KOREWORK/releases/download/offline-fire-drake-v1/KOREWORK-Linux-Complete.tar.gz
+9a9021aedfa51a2631fb647a4de44a9d46a2a1c8831ca335df3e42901e771997  KOREWORK-Windows-Complete.zip
+fd4eefbd758b6a1a51b6bc06e712e9322dfa0abe6af6638bc9d7783b414d5ee7  KOREWORK-Linux-Complete.tar.gz
