@@ -21,9 +21,10 @@ jobs:
           submodules: false
       - name: Create source snapshot
         run: |
-          tar --exclude='.git' --exclude='upstream' --exclude='build' -czf KOREWORK-source-snapshot.tar.gz .
+          tar --exclude='.git' --exclude='upstream' --exclude='build' \
+            -czf "$RUNNER_TEMP/KOREWORK-source-snapshot.tar.gz" .
       - uses: actions/upload-artifact@v4
         with:
           name: KOREWORK-Visual-Rework-Source
-          path: KOREWORK-source-snapshot.tar.gz
+          path: ${{ runner.temp }}/KOREWORK-source-snapshot.tar.gz
           compression-level: 0
