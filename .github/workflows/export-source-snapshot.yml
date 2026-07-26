@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - fix/fire-drake-visual-authenticity-v1
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
