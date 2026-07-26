@@ -82,6 +82,13 @@ public:
         if (!stream_) throw std::runtime_error("Unable to seek binary file: " + path_.string());
     }
 
+    void seek(std::uint64_t absolutePosition) {
+        if (absolutePosition > size_) throw std::runtime_error("Binary seek exceeds file size: " + path_.string());
+        stream_.clear();
+        stream_.seekg(static_cast<std::streamoff>(absolutePosition), std::ios::beg);
+        if (!stream_) throw std::runtime_error("Unable to seek binary file: " + path_.string());
+    }
+
     [[nodiscard]] std::uint64_t position() {
         const auto current = stream_.tellg();
         if (current < 0) throw std::runtime_error("Unable to determine binary position: " + path_.string());

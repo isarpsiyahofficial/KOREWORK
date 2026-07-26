@@ -6,9 +6,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <exception>
 #include <string>
-#include <vector>
 
 namespace korework::client {
 namespace {
@@ -20,48 +20,80 @@ std::string lower(std::string value) {
     return value;
 }
 
-bool containsAny(const std::string& value, const std::vector<std::string>& needles) {
-    return std::any_of(needles.begin(), needles.end(), [&](const std::string& needle) {
-        return value.find(needle) != std::string::npos;
-    });
+bool isUpperOutfitPart(const content::N3CharacterPart& part) {
+    const std::string value = lower(part.sourcePath.filename().string());
+    return value.find("head") != std::string::npos
+        || value.find("hair") != std::string::npos
+        || value.find("_u_") != std::string::npos;
 }
 
 } // namespace
 
-int KoPlayerVisual::scorePath(const std::filesystem::path& path, PlayerClass playerClass) {
-    const std::string value = lower(path.generic_string());
-    if (containsAny(value, {"/npc/", "\\npc\\", "mob_", "/monster/", "\\monster\\"})) return -10000;
-
-    int score = 0;
-    if (value.find("upc") != std::string::npos) score += 80;
-    if (value.find("player") != std::string::npos) score += 60;
-    if (value.find("character") != std::string::npos) score += 20;
-    if (value.find("item") != std::string::npos) score -= 10;
-
-    switch (playerClass) {
-        case PlayerClass::Warrior:
-            if (containsAny(value, {"warrior", "fighter", "blade", "berserker"})) score += 120;
-            break;
-        case PlayerClass::Rogue:
-            if (containsAny(value, {"rogue", "archer", "assassin", "hunter", "ranger"})) score += 120;
-            break;
+std::filesystem::path KoPlayerVisual::authenticCharacterPath() const {
+    // The complete El Morad female Fire Drake character contains the base head/hair
+    // and both underwear/upper outfit sets. Mage has its own complete Karus model.
+    switch (playerClass_) {
         case PlayerClass::Mage:
-            if (containsAny(value, {"mage", "wizard", "sorcerer", "enchanter"})) score += 120;
-            break;
+            return assetRoot_ / "game" / "ChrSelect" / "upc_ka_wt_ma.n3chr";
+        case PlayerClass::Warrior:
+        case PlayerClass::Rogue:
         case PlayerClass::Priest:
-            if (containsAny(value, {"priest", "cleric", "druid", "shaman"})) score += 120;
-            break;
+            return assetRoot_ / "game" / "ChrSelect" / "upc_el_rf_bone.n3chr";
     }
-    if (path.extension() == ".n3chr" || path.extension() == ".N3CHR") score += 5;
-    return score;
+    return {};
 }
 
-bool KoPlayerVisual::tryLoadCharacter(const std::filesystem::path& path) {
+
+std::filesystem::path KoPlayerVisual::authenticAnimationPath() const {
+    switch (playerClass_) {
+        case PlayerClass::Warrior:
+            return assetRoot_ / "game" / "ChrSelect" / "upc_el_rf_wa.n3anim";
+        case PlayerClass::Rogue:
+            return assetRoot_ / "game" / "ChrSelect" / "upc_el_rf_rog.n3anim";
+        case PlayerClass::Mage:
+            return assetRoot_ / "game" / "ChrSelect" / "upc_ka_wt_ma.n3anim";
+        case PlayerClass::Priest:
+            return assetRoot_ / "game" / "ChrSelect" / "upc_el_rf_pri.n3anim";
+    }
+    return {};
+}
+
+std::filesystem::path KoPlayerVisual::authenticWeaponPath() const {
+    switch (playerClass_) {
+        case PlayerClass::Warrior:
+            return assetRoot_ / "game" / "ChrSelect" / "wea_el_long_sword_left.n3cplug";
+        case PlayerClass::Rogue:
+            return assetRoot_ / "game" / "ChrSelect" / "wea_el_rf_rog_bow.n3cplug";
+        case PlayerClass::Mage:
+            return assetRoot_ / "game" / "ChrSelect" / "wea_ka_staff.n3cplug";
+        case PlayerClass::Priest:
+            return assetRoot_ / "game" / "ChrSelect" / "wea_el_wand.n3cplug";
+    }
+    return {};
+}
+
+bool KoPlayerVisual::tryLoadCharacter(const std::filesystem::path& path, bool selectUpperOutfit) {
     try {
         const content::N3CharacterLoader loader(*resolver_);
-        const auto character = loader.load(path);
+        auto character = loader.load(path);
+        if (selectUpperOutfit) {
+            character.parts.erase(std::remove_if(character.parts.begin(), character.parts.end(), [](const auto& part) {
+                return !isUpperOutfitPart(part);
+            }), character.parts.end());
+        }
+        if (character.parts.empty()) {
+            error_ = "Authentic Fire Drake player has no selected render parts";
+            return false;
+        }
+        const auto animationPath = authenticAnimationPath();
+        if (std::filesystem::is_regular_file(animationPath)) character.animationPath = animationPath;
         if (character.animationPath.empty() || !model_.load(character)) {
             error_ = model_.error().empty() ? "N3 player model load failed" : model_.error();
+            return false;
+        }
+        if (!std::isfinite(model_.sourceHeight()) || model_.sourceHeight() < 0.25F || model_.sourceHeight() > 20.0F) {
+            error_ = "N3 player geometry has an invalid source height";
+            model_.unload();
             return false;
         }
         const auto animations = content::N3AnimationSet::load(character.animationPath);
@@ -81,31 +113,25 @@ bool KoPlayerVisual::tryLoadCharacter(const std::filesystem::path& path) {
 
 bool KoPlayerVisual::initialize(const std::filesystem::path& assetRoot, PlayerClass playerClass) {
     assetRoot_ = assetRoot;
+    playerClass_ = playerClass;
     catalog_ = content::KoAssetCatalog::scan(assetRoot_);
     resolver_ = std::make_unique<content::KoAssetResolver>(assetRoot_ / "game");
     model_.unload();
     weapon_.unload();
     animation_.reset();
+    weaponAppearanceId_ = 0U;
     sourceName_.clear();
     error_.clear();
 
-    std::vector<std::pair<int, std::filesystem::path>> candidates;
-    candidates.reserve(catalog_.characterFiles.size());
-    for (const auto& relative : catalog_.characterFiles) {
-        const int score = scorePath(relative, playerClass);
-        if (score > -10000) candidates.emplace_back(score, assetRoot_ / relative);
+    const auto characterPath = authenticCharacterPath();
+    if (characterPath.empty() || !std::filesystem::is_regular_file(characterPath)) {
+        error_ = "Required Fire Drake ChrSelect player asset is missing: " + characterPath.string();
+        return false;
     }
-    std::stable_sort(candidates.begin(), candidates.end(), [](const auto& left, const auto& right) {
-        if (left.first != right.first) return left.first > right.first;
-        return left.second.generic_string() < right.second.generic_string();
-    });
-
-    const std::size_t maximumAttempts = std::min<std::size_t>(candidates.size(), 128U);
-    for (std::size_t index = 0; index < maximumAttempts; ++index) {
-        if (tryLoadCharacter(candidates[index].second)) return true;
-    }
-    if (error_.empty()) error_ = "No non-mob N3 player character could be loaded";
-    return false;
+    const bool selectUpperOutfit = playerClass_ != PlayerClass::Mage;
+    if (!tryLoadCharacter(characterPath, selectUpperOutfit)) return false;
+    (void) loadDefaultWeapon();
+    return true;
 }
 
 bool KoPlayerVisual::tryLoadWeapon(const std::filesystem::path& path) {
@@ -130,26 +156,46 @@ bool KoPlayerVisual::tryLoadWeapon(const std::filesystem::path& path) {
     }
 }
 
+bool KoPlayerVisual::loadDefaultWeapon() {
+    const auto path = authenticWeaponPath();
+    weaponAppearanceId_ = 0U;
+    weapon_.unload();
+    if (path.empty() || !std::filesystem::is_regular_file(path)) return false;
+    return tryLoadWeapon(path);
+}
+
 bool KoPlayerVisual::setWeapon(const data::ItemRecord* item) {
     const std::uint32_t appearanceId = item == nullptr ? 0U : item->appearanceId;
-    if (appearanceId == weaponAppearanceId_) return weapon_.ready() || appearanceId == 0U;
+    if (appearanceId == weaponAppearanceId_ && weapon_.ready()) return true;
+    if (appearanceId == 0U) return loadDefaultWeapon();
+
     weaponAppearanceId_ = appearanceId;
     weapon_.unload();
-    if (!ready() || item == nullptr || appearanceId == 0U) return appearanceId == 0U;
+    if (!ready()) return false;
 
     const std::string exact = std::to_string(appearanceId);
     const std::string broad = std::to_string(appearanceId / 1000U);
-    std::vector<std::filesystem::path> candidates;
     for (const auto& relative : catalog_.equipmentPlugFiles) {
         const std::string filename = lower(relative.filename().string());
-        if (filename.find(exact) != std::string::npos || (broad.size() >= 4U && filename.find(broad) != std::string::npos)) {
-            candidates.push_back(assetRoot_ / relative);
-        }
+        if (filename.find(exact) == std::string::npos
+            && (broad.size() < 4U || filename.find(broad) == std::string::npos)) continue;
+        if (tryLoadWeapon(assetRoot_ / relative)) return true;
     }
-    std::sort(candidates.begin(), candidates.end());
-    for (const auto& candidate : candidates) if (tryLoadWeapon(candidate)) return true;
     error_ = "No N3 weapon plug matched Item_Org appearance id " + exact;
-    return false;
+    return loadDefaultWeapon();
+}
+
+
+void KoPlayerVisual::unload() noexcept {
+    weapon_.unload();
+    model_.unload();
+    animation_.reset();
+    resolver_.reset();
+    catalog_ = {};
+    assetRoot_.clear();
+    weaponAppearanceId_ = 0U;
+    sourceName_.clear();
+    error_.clear();
 }
 
 void KoPlayerVisual::update(N3AnimationState state, float deltaSeconds) {
@@ -166,10 +212,10 @@ void KoPlayerVisual::update(N3AnimationState state, float deltaSeconds) {
     }
 }
 
-void KoPlayerVisual::draw(Vector3 worldPosition, float targetHeight, Color tint) const {
+void KoPlayerVisual::draw(Vector3 worldPosition, float targetHeight, Color tint, float yawDegrees) const {
     if (!ready()) return;
-    model_.draw(worldPosition, targetHeight, tint);
-    if (weapon_.ready()) weapon_.draw(worldPosition, targetHeight, model_.sourceHeight(), tint);
+    model_.draw(worldPosition, targetHeight, tint, yawDegrees);
+    if (weapon_.ready()) weapon_.draw(worldPosition, targetHeight, model_.sourceHeight(), tint, yawDegrees);
 }
 
 } // namespace korework::client

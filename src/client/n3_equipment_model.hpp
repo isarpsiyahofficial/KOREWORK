@@ -26,7 +26,8 @@ public:
     void draw(Vector3 worldPosition,
               float targetCharacterHeight,
               float sourceCharacterHeight,
-              Color tint = WHITE) const;
+              Color tint = WHITE,
+              float yawDegrees = 0.0F) const;
     void unload() noexcept;
 
     [[nodiscard]] bool ready() const noexcept { return ready_; }

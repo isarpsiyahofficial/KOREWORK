@@ -5,18 +5,20 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-include(FetchContent)
-set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-
-FetchContent_Declare(
-    raylib
-    GIT_REPOSITORY https://github.com/raysan5/raylib.git
-    GIT_TAG 5.0
-    GIT_SHALLOW TRUE
-)
-FetchContent_MakeAvailable(raylib)
+find_package(raylib CONFIG QUIET)
+if(NOT raylib_FOUND)
+    include(FetchContent)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        raylib
+        GIT_REPOSITORY https://github.com/raysan5/raylib.git
+        GIT_TAG 5.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(raylib)
+endif()
 
 add_library(korework_content STATIC
     src/content/asset_catalog.cpp
@@ -27,6 +29,7 @@ add_library(korework_content STATIC
     src/content/n3_character.cpp
     src/content/n3_equipment.cpp
     src/content/n3_skeleton.cpp
+    src/content/n3_shape.cpp
     src/content/n3_texture.cpp
     src/content/npc_looks_table.cpp
     src/content/smd_map.cpp
@@ -56,6 +59,7 @@ add_executable(korework
     src/client/n3_character_attachment.cpp
     src/client/n3_character_model.cpp
     src/client/n3_equipment_model.cpp
+    src/client/n3_shape_model.cpp
     src/client/smd_terrain.cpp
 )
 target_include_directories(korework PRIVATE src)
@@ -68,6 +72,18 @@ add_executable(korework_equipment_probe tools/ko_equipment_probe.cpp)
 target_link_libraries(korework_equipment_probe PRIVATE korework_content)
 add_executable(korework_player_probe tools/ko_player_probe.cpp)
 target_link_libraries(korework_player_probe PRIVATE korework_content)
+add_executable(korework_shape_probe tools/ko_shape_probe.cpp)
+target_link_libraries(korework_shape_probe PRIVATE korework_content)
+add_executable(korework_visual_viewer
+    tools/n3_visual_viewer.cpp
+    src/client/ko_player_visual.cpp
+    src/client/n3_character_model.cpp
+    src/client/n3_character_attachment.cpp
+    src/client/n3_equipment_model.cpp
+    src/client/n3_shape_model.cpp
+)
+target_include_directories(korework_visual_viewer PRIVATE src)
+target_link_libraries(korework_visual_viewer PRIVATE korework_runtime raylib)
 add_executable(korework_dataset_compiler tools/openko_dataset_compiler.cpp)
 target_link_libraries(korework_dataset_compiler PRIVATE korework_content)
 add_executable(korework_spawn_compiler tools/openko_spawn_compiler.cpp)
@@ -80,6 +96,7 @@ if(MSVC)
     target_compile_options(korework_content_probe PRIVATE /W4 /permissive-)
     target_compile_options(korework_equipment_probe PRIVATE /W4 /permissive-)
     target_compile_options(korework_player_probe PRIVATE /W4 /permissive-)
+    target_compile_options(korework_shape_probe PRIVATE /W4 /permissive-)
     target_compile_options(korework_dataset_compiler PRIVATE /W4 /permissive-)
     target_compile_options(korework_spawn_compiler PRIVATE /W4 /permissive-)
 else()
@@ -89,6 +106,7 @@ else()
     target_compile_options(korework_content_probe PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_equipment_probe PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_player_probe PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(korework_shape_probe PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_dataset_compiler PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(korework_spawn_compiler PRIVATE -Wall -Wextra -Wpedantic)
 endif()

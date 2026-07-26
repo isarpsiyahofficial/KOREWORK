@@ -1,0 +1,74 @@
+name: Export Visual Rework Source
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-payload:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Apply locally validated source payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          parts=(.visual-rework-payload.part-*)
+          if (( ${#parts[@]} == 0 )); then
+            echo 'No visual rework payload to apply.'
+            exit 0
+          fi
+          cat "${parts[@]}" | base64 --decode > "$RUNNER_TEMP/visual-rework.tar.gz"
+          echo '4981687416ab7383305dcbc23851aec6cb8cea49d1c45454ed1669049d08a596  '"$RUNNER_TEMP/visual-rework.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/visual-rework.tar.gz" -C .
+          rm "${parts[@]}"
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add -A
+          git commit -m 'Rebuild authentic Fire Drake character selection visuals'
+          git push origin HEAD:${GITHUB_HEAD_REF}
+
+  export:
+    needs: apply-payload
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 1
+          submodules: false
+      - name: Fetch and build pinned raylib
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libasound2-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxcursor-dev libxinerama-dev
+          git clone --depth 1 --branch 5.0 https://github.com/raysan5/raylib.git "$RUNNER_TEMP/raylib"
+          rm -rf "$RUNNER_TEMP/raylib/.git"
+          cmake -S "$RUNNER_TEMP/raylib" -B "$RUNNER_TEMP/raylib-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_GAMES=OFF \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/raylib-sdk"
+          cmake --build "$RUNNER_TEMP/raylib-build" --parallel 2
+          cmake --install "$RUNNER_TEMP/raylib-build"
+      - name: Create source snapshots
+        run: |
+          tar --exclude='.git' --exclude='upstream' --exclude='build' \
+            -czf "$RUNNER_TEMP/KOREWORK-source-snapshot.tar.gz" .
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/raylib-5.0-source.tar.gz" raylib
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/raylib-5.0-sdk-linux-x64.tar.gz" raylib-sdk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KOREWORK-Visual-Rework-Source
+          path: |
+            ${{ runner.temp }}/KOREWORK-source-snapshot.tar.gz
+            ${{ runner.temp }}/raylib-5.0-source.tar.gz
+            ${{ runner.temp }}/raylib-5.0-sdk-linux-x64.tar.gz
+          compression-level: 0

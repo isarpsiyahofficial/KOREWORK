@@ -3,8 +3,11 @@
 #include "client/ko_monster_visual_bank.hpp"
 #include "client/ko_player_visual.hpp"
 #include "client/offline_skill_vfx.hpp"
+#include "client/n3_shape_model.hpp"
 #include "client/smd_terrain.hpp"
 #include "content/asset_catalog.hpp"
+#include "content/ko_asset_resolver.hpp"
+#include "content/n3_shape.hpp"
 #include "content/smd_map.hpp"
 #include "offline_npc_system.hpp"
 #include "offline_roster.hpp"
@@ -32,6 +35,7 @@ using client::KoMonsterVisualBank;
 using client::KoPlayerVisual;
 using client::N3AnimationState;
 using client::OfflineSkillVfx;
+using client::N3ShapeModel;
 using client::SmdTerrainModel;
 using content::KoAssetCatalog;
 using content::SmdMap;
@@ -72,6 +76,23 @@ void drawCentered(const std::string& text, int y, int fontSize, Color color) {
     DrawText(text.c_str(), (GetScreenWidth() - MeasureText(text.c_str(), fontSize)) / 2, y, fontSize, color);
 }
 
+std::optional<std::filesystem::path> locateAssetRoot();
+
+void drawFireDrakePanel(Rectangle rectangle, bool selected) {
+    const Color shadow {3, 3, 4, 205};
+    const Color stone {27, 24, 21, 232};
+    const Color inner {52, 44, 32, 225};
+    const Color border = selected ? Color{230, 187, 83, 255} : Color{123, 104, 71, 235};
+    DrawRectangleRec({rectangle.x + 4.0F, rectangle.y + 5.0F, rectangle.width, rectangle.height}, shadow);
+    DrawRectangleRec(rectangle, stone);
+    DrawRectangleLinesEx(rectangle, selected ? 3.0F : 2.0F, border);
+    DrawRectangleLinesEx({rectangle.x + 5.0F, rectangle.y + 5.0F, rectangle.width - 10.0F, rectangle.height - 10.0F}, 1.0F, inner);
+    DrawTriangle({rectangle.x + 8.0F, rectangle.y + 8.0F}, {rectangle.x + 22.0F, rectangle.y + 8.0F}, {rectangle.x + 8.0F, rectangle.y + 22.0F}, border);
+    DrawTriangle({rectangle.x + rectangle.width - 8.0F, rectangle.y + 8.0F},
+                 {rectangle.x + rectangle.width - 22.0F, rectangle.y + 8.0F},
+                 {rectangle.x + rectangle.width - 8.0F, rectangle.y + 22.0F}, border);
+}
+
 std::optional<ProfileSelection> selectCharacter() {
     OfflineRoster roster;
     std::size_t selected = 0U;
@@ -80,22 +101,77 @@ std::optional<ProfileSelection> selectCharacter() {
     PlayerClass newClass = PlayerClass::Warrior;
     std::string error;
 
+    const auto assetRoot = locateAssetRoot();
+    content::KoAssetResolver resolver(assetRoot.has_value() ? *assetRoot / "game" : std::filesystem::path{});
+    N3ShapeModel throneRoom;
+    bool throneReady = false;
+    std::array<KoPlayerVisual, OfflineRoster::SlotCount> visuals;
+    KoPlayerVisual createPreview;
+
+    if (assetRoot.has_value()) {
+        try {
+            const content::N3ShapeLoader loader(resolver);
+            throneReady = throneRoom.load(loader.load(*assetRoot / "game" / "ChrSelect" / "el_chairs.n3shape"));
+        } catch (const std::exception& exception) {
+            error = exception.what();
+        }
+    }
+
+    auto refreshVisual = [&](std::size_t index) {
+        visuals[index].unload();
+        if (!assetRoot.has_value()) return;
+        if (const CharacterSlot* slot = roster.slot(index); slot != nullptr) {
+            if (!visuals[index].initialize(*assetRoot, slot->playerClass)) error = visuals[index].error();
+        }
+    };
+    for (std::size_t index = 0; index < OfflineRoster::SlotCount; ++index) refreshVisual(index);
+
+    const bool visualTest = [] {
+        const char* value = std::getenv("KOREWORK_VISUAL_TEST");
+        return value != nullptr && std::string(value) == "character-select";
+    }();
+    if (visualTest && assetRoot.has_value()) {
+        const std::array<PlayerClass, 3> testClasses {PlayerClass::Warrior, PlayerClass::Rogue, PlayerClass::Mage};
+        for (std::size_t index = 0; index < visuals.size(); ++index) {
+            visuals[index].unload();
+            (void) visuals[index].initialize(*assetRoot, testClasses[index]);
+        }
+    }
+
+    Camera3D camera {};
+    camera.position = {0.0F, -0.2F, 7.0F};
+    camera.target = {0.0F, -0.4F, 0.0F};
+    camera.up = {0.0F, 1.0F, 0.0F};
+    camera.fovy = 55.0F;
+    camera.projection = CAMERA_PERSPECTIVE;
+    const std::array<Vector3, 3> positions {{{0.0F, -1.20F, 2.74F}, {1.70F, -1.20F, 2.12F}, {-1.72F, -1.20F, 2.12F}}};
+    const std::array<float, 3> rotations {{0.0F, 40.0F, -43.0F}};
+    int visualTestFrame = 0;
+
     while (!WindowShouldClose()) {
+        const float delta = std::min(GetFrameTime(), 0.05F);
         if (!creating) {
-            if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S)) selected = (selected + 1U) % OfflineRoster::SlotCount;
-            if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W)) selected = (selected + OfflineRoster::SlotCount - 1U) % OfflineRoster::SlotCount;
+            if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) selected = (selected + 1U) % OfflineRoster::SlotCount;
+            if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A)) selected = (selected + OfflineRoster::SlotCount - 1U) % OfflineRoster::SlotCount;
             if (IsKeyPressed(KEY_ENTER)) {
                 if (const CharacterSlot* slot = roster.slot(selected); slot != nullptr) return ProfileSelection{selected, *slot};
                 creating = true;
                 newName.clear();
                 newClass = PlayerClass::Warrior;
                 error.clear();
+                if (assetRoot.has_value()) (void) createPreview.initialize(*assetRoot, newClass);
             }
-            if (IsKeyPressed(KEY_N) && roster.slot(selected) == nullptr) creating = true;
+            if (IsKeyPressed(KEY_N) && roster.slot(selected) == nullptr) {
+                creating = true;
+                newName.clear();
+                newClass = PlayerClass::Warrior;
+                if (assetRoot.has_value()) (void) createPreview.initialize(*assetRoot, newClass);
+            }
             if (IsKeyDown(KEY_LEFT_SHIFT) && IsKeyPressed(KEY_DELETE) && roster.slot(selected) != nullptr) {
                 (void) roster.remove(selected);
+                refreshVisual(selected);
             }
-            if (IsKeyPressed(KEY_ESCAPE)) return std::nullopt;
+            if (IsKeyPressed(KEY_ESCAPE) && !visualTest) return std::nullopt;
         } else {
             int character = GetCharPressed();
             while (character > 0) {
@@ -103,14 +179,22 @@ std::optional<ProfileSelection> selectCharacter() {
                 character = GetCharPressed();
             }
             if (IsKeyPressed(KEY_BACKSPACE) && !newName.empty()) newName.pop_back();
-            if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A)) newClass = cycleClass(newClass, -1);
-            if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) newClass = cycleClass(newClass, 1);
+            bool classChanged = false;
+            if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A)) { newClass = cycleClass(newClass, -1); classChanged = true; }
+            if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) { newClass = cycleClass(newClass, 1); classChanged = true; }
+            if (classChanged && assetRoot.has_value()) {
+                createPreview.unload();
+                if (!createPreview.initialize(*assetRoot, newClass)) error = createPreview.error();
+            }
             if (IsKeyPressed(KEY_ESCAPE)) {
                 creating = false;
+                createPreview.unload();
                 error.clear();
             }
             if (IsKeyPressed(KEY_ENTER)) {
                 if (roster.create(selected, newName, newClass)) {
+                    refreshVisual(selected);
+                    createPreview.unload();
                     if (const CharacterSlot* slot = roster.slot(selected); slot != nullptr) return ProfileSelection{selected, *slot};
                 } else {
                     error = "Name must be unique and contain 3-20 characters.";
@@ -118,52 +202,75 @@ std::optional<ProfileSelection> selectCharacter() {
             }
         }
 
-        BeginDrawing();
-        ClearBackground(Color{13, 16, 22, 255});
-        drawCentered("KOREWORK", 42, 46, Color{224, 189, 92, 255});
-        drawCentered("OFFLINE FIRE DRAKE", 94, 20, Color{170, 176, 188, 255});
+        for (auto& visual : visuals) visual.update(N3AnimationState::Idle, delta);
+        createPreview.update(N3AnimationState::Idle, delta);
 
-        const float cardWidth = clampFloat(static_cast<float>(GetScreenWidth()) * 0.24F, 230.0F, 360.0F);
-        const float totalWidth = cardWidth * 3.0F + 56.0F;
-        const float startX = (static_cast<float>(GetScreenWidth()) - totalWidth) * 0.5F;
+        BeginDrawing();
+        ClearBackground(Color{8, 8, 9, 255});
+        BeginMode3D(camera);
+        if (throneReady) throneRoom.draw();
+        for (std::size_t index = 0; index < visuals.size(); ++index) {
+            if (creating && index == selected && createPreview.ready()) {
+                createPreview.draw(positions[index], index == selected ? 2.08F : 1.95F, WHITE, rotations[index]);
+            } else if (visuals[index].ready()) {
+                const float height = index == selected ? 2.08F : 1.95F;
+                visuals[index].draw(positions[index], height, WHITE, rotations[index]);
+            }
+            if (index == selected) {
+                DrawCircle3D({positions[index].x, -1.185F, positions[index].z}, 0.72F,
+                             {1.0F, 0.0F, 0.0F}, 90.0F, Color{235, 190, 74, 185});
+            }
+        }
+        EndMode3D();
+
+        DrawRectangleGradientV(0, 0, GetScreenWidth(), 72, Color{0, 0, 0, 210}, Color{0, 0, 0, 0});
+        drawCentered("CHARACTER SELECTION", 20, 28, Color{233, 211, 153, 255});
+
+        const float nameplateWidth = clampFloat(GetScreenWidth() * 0.18F, 210.0F, 290.0F);
+        const std::array<float, 3> plateCenters {{GetScreenWidth() * 0.50F, GetScreenWidth() * 0.75F, GetScreenWidth() * 0.25F}};
         for (std::size_t index = 0; index < OfflineRoster::SlotCount; ++index) {
-            const Rectangle card {startX + static_cast<float>(index) * (cardWidth + 28.0F), 170.0F, cardWidth, 330.0F};
-            const bool highlighted = index == selected;
-            DrawRectangleRounded(card, 0.07F, 8, highlighted ? Color{38, 43, 55, 255} : Color{24, 28, 36, 255});
-            DrawRectangleLinesEx(card, highlighted ? 3.0F : 1.0F,
-                                 highlighted ? Color{225, 186, 82, 255} : Color{82, 88, 102, 255});
+            Rectangle plate {plateCenters[index] - nameplateWidth * 0.5F, GetScreenHeight() - 134.0F, nameplateWidth, 76.0F};
+            drawFireDrakePanel(plate, index == selected);
             const CharacterSlot* slot = roster.slot(index);
-            if (slot == nullptr) {
-                DrawCircle(static_cast<int>(card.x + card.width * 0.5F), static_cast<int>(card.y + 95.0F), 45.0F, Color{50, 54, 65, 255});
-                DrawText("EMPTY SLOT", static_cast<int>(card.x + 24.0F), static_cast<int>(card.y + 175.0F), 24, Color{145, 150, 164, 255});
-                DrawText("ENTER / N: CREATE", static_cast<int>(card.x + 24.0F), static_cast<int>(card.y + 220.0F), 17, LIGHTGRAY);
+            if (visualTest && slot == nullptr) {
+                static const std::array<const char*, 3> names {"WARRIOR", "ROGUE", "MAGE"};
+                DrawText(names[index], static_cast<int>(plate.x + 16.0F), static_cast<int>(plate.y + 15.0F), 20, RAYWHITE);
+                DrawText("Fire Drake Preview", static_cast<int>(plate.x + 16.0F), static_cast<int>(plate.y + 43.0F), 14, Color{196, 177, 130, 255});
+            } else if (slot == nullptr) {
+                DrawText("EMPTY SLOT", static_cast<int>(plate.x + 16.0F), static_cast<int>(plate.y + 15.0F), 20, Color{188, 177, 154, 255});
+                DrawText("ENTER TO CREATE", static_cast<int>(plate.x + 16.0F), static_cast<int>(plate.y + 43.0F), 14, Color{217, 188, 113, 255});
             } else {
-                const Color tint = classColor(slot->playerClass);
-                DrawCircle(static_cast<int>(card.x + card.width * 0.5F), static_cast<int>(card.y + 90.0F), 48.0F, tint);
-                DrawRectangle(static_cast<int>(card.x + card.width * 0.5F - 25.0F), static_cast<int>(card.y + 115.0F), 50, 70, tint);
-                DrawText(slot->name.c_str(), static_cast<int>(card.x + 22.0F), static_cast<int>(card.y + 205.0F), 26, RAYWHITE);
-                DrawText(OfflineRoster::className(slot->playerClass), static_cast<int>(card.x + 22.0F), static_cast<int>(card.y + 244.0F), 21, Color{234, 204, 124, 255});
-                const std::string level = "Level " + std::to_string(slot->level);
-                DrawText(level.c_str(), static_cast<int>(card.x + 22.0F), static_cast<int>(card.y + 278.0F), 19, LIGHTGRAY);
+                DrawText(slot->name.c_str(), static_cast<int>(plate.x + 16.0F), static_cast<int>(plate.y + 12.0F), 21, RAYWHITE);
+                const std::string detail = std::string(OfflineRoster::className(slot->playerClass)) + "  LV " + std::to_string(slot->level);
+                DrawText(detail.c_str(), static_cast<int>(plate.x + 16.0F), static_cast<int>(plate.y + 43.0F), 15, Color{217, 188, 113, 255});
             }
         }
 
         if (creating) {
-            const Rectangle modal {(GetScreenWidth() - 520.0F) * 0.5F, 535.0F, 520.0F, 185.0F};
-            DrawRectangleRounded(modal, 0.05F, 8, Color{8, 10, 14, 245});
-            DrawRectangleLinesEx(modal, 2.0F, Color{220, 181, 77, 255});
-            DrawText("CREATE CHARACTER", static_cast<int>(modal.x + 20.0F), static_cast<int>(modal.y + 16.0F), 24, Color{238, 210, 132, 255});
-            DrawRectangleRounded({modal.x + 20.0F, modal.y + 55.0F, 480.0F, 38.0F}, 0.15F, 5, Color{31, 35, 44, 255});
-            DrawText(newName.empty() ? "Type character name..." : newName.c_str(), static_cast<int>(modal.x + 32.0F), static_cast<int>(modal.y + 64.0F), 20,
-                     newName.empty() ? Color{130, 135, 148, 255} : RAYWHITE);
+            const Rectangle modal {(GetScreenWidth() - 570.0F) * 0.5F, GetScreenHeight() - 245.0F, 570.0F, 95.0F};
+            drawFireDrakePanel(modal, true);
+            DrawText("NAME", static_cast<int>(modal.x + 18.0F), static_cast<int>(modal.y + 14.0F), 16, Color{219, 190, 120, 255});
+            DrawRectangle(static_cast<int>(modal.x + 82.0F), static_cast<int>(modal.y + 11.0F), 280, 28, Color{8, 8, 8, 235});
+            DrawRectangleLines(static_cast<int>(modal.x + 82.0F), static_cast<int>(modal.y + 11.0F), 280, 28, Color{116, 93, 57, 255});
+            DrawText(newName.empty() ? "Type name..." : newName.c_str(), static_cast<int>(modal.x + 91.0F), static_cast<int>(modal.y + 16.0F), 17,
+                     newName.empty() ? Color{125, 119, 106, 255} : RAYWHITE);
             const std::string classLine = std::string("<  ") + OfflineRoster::className(newClass) + "  >";
-            DrawText(classLine.c_str(), static_cast<int>(modal.x + 22.0F), static_cast<int>(modal.y + 108.0F), 23, classColor(newClass));
-            DrawText("ENTER: CREATE   ESC: CANCEL", static_cast<int>(modal.x + 235.0F), static_cast<int>(modal.y + 113.0F), 16, LIGHTGRAY);
-            if (!error.empty()) DrawText(error.c_str(), static_cast<int>(modal.x + 20.0F), static_cast<int>(modal.y + 153.0F), 15, Color{255, 116, 104, 255});
+            DrawText(classLine.c_str(), static_cast<int>(modal.x + 385.0F), static_cast<int>(modal.y + 16.0F), 18, classColor(newClass));
+            DrawText("ENTER CREATE     ESC CANCEL", static_cast<int>(modal.x + 84.0F), static_cast<int>(modal.y + 57.0F), 15, Color{205, 194, 169, 255});
+            if (!error.empty()) DrawText(error.c_str(), static_cast<int>(modal.x + 298.0F), static_cast<int>(modal.y + 58.0F), 13, Color{244, 111, 87, 255});
         } else {
-            drawCentered("UP/DOWN: SELECT   ENTER: PLAY/CREATE   SHIFT+DELETE: DELETE   ESC: EXIT", GetScreenHeight() - 48, 17, LIGHTGRAY);
+            drawCentered("LEFT / RIGHT SELECT     ENTER PLAY     N CREATE     SHIFT+DELETE DELETE", GetScreenHeight() - 28, 14, Color{215, 207, 190, 255});
         }
         EndDrawing();
+
+        if (visualTest) {
+            ++visualTestFrame;
+            if (visualTestFrame == 75) {
+                const char* screenshot = std::getenv("KOREWORK_SCREENSHOT_PATH");
+                TakeScreenshot(screenshot != nullptr && *screenshot != '\0' ? screenshot : "korework-character-select.png");
+            }
+            if (visualTestFrame > 80) return std::nullopt;
+        }
     }
     return std::nullopt;
 }
