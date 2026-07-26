@@ -21,6 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download validated Windows and Linux artifacts
         shell: bash
         env:
@@ -83,4 +88,28 @@ jobs:
               --notes "Validated Windows and Linux offline packages. Includes executable, SQL-free KOPACK, KOSPAWN and the complete KO asset tree." \
               --latest \
               --repo "${GITHUB_REPOSITORY}"
+          fi
+
+      - name: Verify public URLs and record publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          WINDOWS_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/KOREWORK-Windows-Complete.zip"
+          LINUX_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/KOREWORK-Linux-Complete.tar.gz"
+          curl --fail --location --head --retry 5 "$WINDOWS_URL" >/dev/null
+          curl --fail --location --head --retry 5 "$LINUX_URL" >/dev/null
+          mkdir -p .validation
+          {
+            echo "status=passed"
+            echo "release_tag=${RELEASE_TAG}"
+            echo "windows_url=${WINDOWS_URL}"
+            echo "linux_url=${LINUX_URL}"
+            cat SHA256SUMS.txt
+          } > .validation/release-published.txt
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add .validation/release-published.txt
+          if ! git diff --cached --quiet; then
+            git commit -m "Record permanent package release [skip ci]"
+            git push origin HEAD:main
           fi
