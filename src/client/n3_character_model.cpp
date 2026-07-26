@@ -294,10 +294,13 @@ void N3CharacterModel::unload() noexcept {
     minimumY_ = 0.0F;
 }
 
-void N3CharacterModel::draw(Vector3 worldPosition, float targetHeight, Color tint) const {
+void N3CharacterModel::draw(Vector3 worldPosition, float targetHeight, Color tint, float yawDegrees) const {
     if (!ready_ || sourceHeight_ <= 0.0F) return;
     const float scale = targetHeight / sourceHeight_;
-    for (const PartRuntime& part : parts_) DrawModel(part.model, worldPosition, scale, tint);
+    for (const PartRuntime& part : parts_) {
+        DrawModelEx(part.model, worldPosition, {0.0F, 1.0F, 0.0F}, yawDegrees,
+                    {scale, scale, scale}, tint);
+    }
 }
 
 } // namespace korework::client

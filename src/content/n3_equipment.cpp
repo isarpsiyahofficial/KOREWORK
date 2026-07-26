@@ -116,7 +116,7 @@ N3ProgressiveMesh N3EquipmentLoader::loadProgressiveMesh(const std::filesystem::
         vertex.position = readVector3(reader);
         vertex.normal = readVector3(reader);
         vertex.uv.u = reader.read<float>();
-        vertex.uv.v = 1.0F - reader.read<float>();
+        vertex.uv.v = reader.read<float>();
         requireFinite(vertex.uv.u, "progressive UV");
         requireFinite(vertex.uv.v, "progressive UV");
         mesh.vertices.push_back(vertex);

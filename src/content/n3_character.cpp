@@ -96,6 +96,12 @@ N3Character N3CharacterLoader::load(const std::filesystem::path& characterPath) 
         const std::string collisionSkinReference = reader.readString();
         if (!collisionSkinReference.empty()) (void) resolver_.resolve(characterPath, collisionSkinReference);
     }
+    while (reader.remaining() >= sizeof(std::int32_t)) {
+        const std::int32_t legacySentinel = reader.read<std::int32_t>();
+        if (legacySentinel != -1 && legacySentinel != 0) {
+            throw std::runtime_error("Unexpected trailing N3 character sentinel: " + std::to_string(legacySentinel));
+        }
+    }
     if (reader.remaining() != 0U) throw std::runtime_error("Unexpected trailing N3 character bytes: " + std::to_string(reader.remaining()));
     if (character.parts.empty()) throw std::runtime_error("N3 character contains no renderable parts: " + characterPath.string());
     return character;
@@ -106,8 +112,7 @@ N3CharacterPart N3CharacterLoader::loadPart(const std::filesystem::path& partPat
     N3CharacterPart part;
     part.sourcePath = partPath;
     part.name = reader.readString();
-    const std::int32_t version = reader.read<std::int32_t>();
-    if (version < 0 || version > 1) throw std::runtime_error("Unsupported N3 character part version: " + std::to_string(version));
+    (void) reader.read<std::int32_t>(); // Legacy m_dwReserved; -1 is valid in Fire Drake assets.
 
     for (float& channel : part.diffuse) {
         channel = reader.read<float>();
@@ -117,10 +122,6 @@ N3CharacterPart N3CharacterLoader::loadPart(const std::filesystem::path& partPat
 
     const std::string textureReference = reader.readString();
     if (!textureReference.empty()) part.texturePath = resolveRequired(resolver_, partPath, textureReference, "texture");
-    if (version == 1) {
-        const std::string diffuseTextureReference = reader.readString();
-        if (!diffuseTextureReference.empty()) (void) resolveRequired(resolver_, partPath, diffuseTextureReference, "diffuse texture");
-    }
 
     part.skinsPath = resolveRequired(resolver_, partPath, reader.readString(), "character skins");
     if (reader.remaining() != 0U) throw std::runtime_error("Unexpected trailing N3 character part bytes: " + std::to_string(reader.remaining()));

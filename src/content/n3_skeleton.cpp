@@ -163,7 +163,11 @@ N3Matrix4 localMatrix(const N3Joint& joint, float frame) {
     return matrix;
 }
 
-void readJoint(BinaryReader& reader, std::vector<N3Joint>& joints, std::int32_t parentIndex, std::int32_t depth) {
+void readJoint(BinaryReader& reader,
+               std::vector<N3Joint>& joints,
+               std::int32_t parentIndex,
+               std::int32_t depth,
+               bool& orientationKeysPresent) {
     if (depth > kMaximumDepth || joints.size() >= static_cast<std::size_t>(kMaximumJointCount)) {
         throw std::runtime_error("N3 joint hierarchy exceeds safety limits");
     }
@@ -179,12 +183,32 @@ void readJoint(BinaryReader& reader, std::vector<N3Joint>& joints, std::int32_t 
     joint.positionKeys = readVectorKey(reader);
     joint.rotationKeys = readQuaternionKey(reader);
     joint.scaleKeys = readVectorKey(reader);
-    joint.orientationKeys = readQuaternionKey(reader);
+
+    if (depth == 0) {
+        const std::uint64_t markerPosition = reader.position();
+        const std::int32_t candidateCount = reader.read<std::int32_t>();
+        requireCount(candidateCount, kMaximumKeyCount, "orientation key or root child");
+        if (candidateCount == 0) {
+            // Modern N3 joints write an empty orientation key before child count.
+            // An old leaf root can omit it; only choose the legacy path when no child field remains.
+            orientationKeysPresent = reader.remaining() >= sizeof(std::int32_t);
+        } else if (reader.remaining() >= sizeof(std::uint32_t) + sizeof(float)) {
+            const std::uint32_t candidateType = reader.read<std::uint32_t>();
+            orientationKeysPresent = candidateType == 1U;
+        } else {
+            orientationKeysPresent = false;
+        }
+        reader.seek(markerPosition);
+    }
+
+    if (orientationKeysPresent) joint.orientationKeys = readQuaternionKey(reader);
 
     const std::int32_t childCount = reader.read<std::int32_t>();
     requireCount(childCount, kMaximumChildren, "joint child");
     joints[static_cast<std::size_t>(currentIndex)] = std::move(joint);
-    for (std::int32_t child = 0; child < childCount; ++child) readJoint(reader, joints, currentIndex, depth + 1);
+    for (std::int32_t child = 0; child < childCount; ++child) {
+        readJoint(reader, joints, currentIndex, depth + 1, orientationKeysPresent);
+    }
 }
 
 } // namespace
@@ -260,7 +284,8 @@ N3Quaternion N3QuaternionKey::sample(float frame, const N3Quaternion& fallback) 
 N3Skeleton N3Skeleton::load(const std::filesystem::path& path) {
     BinaryReader reader(path);
     N3Skeleton skeleton;
-    readJoint(reader, skeleton.joints_, -1, 0);
+    bool orientationKeysPresent = true;
+    readJoint(reader, skeleton.joints_, -1, 0, orientationKeysPresent);
     if (reader.remaining() != 0U) throw std::runtime_error("Unexpected trailing N3 joint bytes: " + std::to_string(reader.remaining()));
     skeleton.bindWorld_ = skeleton.worldMatrices(0.0F);
     skeleton.inverseBindWorld_.reserve(skeleton.bindWorld_.size());

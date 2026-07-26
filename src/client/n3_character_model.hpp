@@ -23,7 +23,7 @@ public:
     bool load(const content::N3Character& character, std::size_t preferredLod = 0);
     bool updateAnimation(float frame) noexcept;
     void unload() noexcept;
-    void draw(Vector3 worldPosition, float targetHeight, Color tint = WHITE) const;
+    void draw(Vector3 worldPosition, float targetHeight, Color tint = WHITE, float yawDegrees = 0.0F) const;
 
     [[nodiscard]] bool ready() const noexcept { return ready_; }
     [[nodiscard]] bool animated() const noexcept { return animated_; }

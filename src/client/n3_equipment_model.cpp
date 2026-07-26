@@ -166,9 +166,12 @@ bool N3EquipmentModel::update(const content::N3Matrix4& jointWorld,
 void N3EquipmentModel::draw(Vector3 worldPosition,
                             float targetCharacterHeight,
                             float sourceCharacterHeight,
-                            Color tint) const {
+                            Color tint,
+                            float yawDegrees) const {
     if (!ready_ || sourceCharacterHeight <= 0.0F) return;
-    DrawModel(model_, worldPosition, targetCharacterHeight / sourceCharacterHeight, tint);
+    const float scale = targetCharacterHeight / sourceCharacterHeight;
+    DrawModelEx(model_, worldPosition, {0.0F, 1.0F, 0.0F}, yawDegrees,
+                {scale, scale, scale}, tint);
 }
 
 void N3EquipmentModel::unload() noexcept {

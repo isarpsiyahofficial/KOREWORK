@@ -24,17 +24,22 @@ public:
     bool initialize(const std::filesystem::path& assetRoot, PlayerClass playerClass);
     void update(N3AnimationState state, float deltaSeconds);
     bool setWeapon(const data::ItemRecord* item);
-    void draw(Vector3 worldPosition, float targetHeight, Color tint = WHITE) const;
+    void unload() noexcept;
+    void draw(Vector3 worldPosition, float targetHeight, Color tint = WHITE, float yawDegrees = 0.0F) const;
 
     [[nodiscard]] bool ready() const noexcept { return model_.ready(); }
     [[nodiscard]] bool weaponReady() const noexcept { return weapon_.ready(); }
     [[nodiscard]] const std::string& sourceName() const noexcept { return sourceName_; }
     [[nodiscard]] const std::string& error() const noexcept { return error_; }
+    [[nodiscard]] PlayerClass playerClass() const noexcept { return playerClass_; }
 
 private:
-    [[nodiscard]] static int scorePath(const std::filesystem::path& path, PlayerClass playerClass);
-    [[nodiscard]] bool tryLoadCharacter(const std::filesystem::path& path);
+    [[nodiscard]] bool tryLoadCharacter(const std::filesystem::path& path, bool selectUpperOutfit);
     [[nodiscard]] bool tryLoadWeapon(const std::filesystem::path& path);
+    [[nodiscard]] bool loadDefaultWeapon();
+    [[nodiscard]] std::filesystem::path authenticCharacterPath() const;
+    [[nodiscard]] std::filesystem::path authenticWeaponPath() const;
+    [[nodiscard]] std::filesystem::path authenticAnimationPath() const;
 
     std::filesystem::path assetRoot_;
     content::KoAssetCatalog catalog_;
@@ -42,6 +47,7 @@ private:
     N3CharacterModel model_;
     N3AnimationPlayer animation_;
     N3EquipmentModel weapon_;
+    PlayerClass playerClass_ = PlayerClass::Warrior;
     std::uint32_t weaponAppearanceId_ = 0;
     std::string sourceName_;
     std::string error_;
