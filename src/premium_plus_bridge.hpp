@@ -4,6 +4,13 @@
 #include <cstdint>
 #include <utility>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace korework::premium_plus {
 
 inline int skillSlotFromVirtualKey(int virtualKey) noexcept {
@@ -17,11 +24,6 @@ inline bool isBasicAttackKey(int virtualKey) noexcept {
 }
 
 #ifdef _WIN32
-
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
 
 inline constexpr wchar_t kMappingName[] = L"Local\\PremiumPlusCombo.Rogue.GameBridge.v1";
 inline constexpr std::uint32_t kMagic = 0x50435042u;
