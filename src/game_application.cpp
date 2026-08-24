@@ -9,6 +9,7 @@
 #include "offline_npc_system.hpp"
 #include "offline_roster.hpp"
 #include "offline_runtime.hpp"
+#include "premium_plus_bridge.hpp"
 
 #include "raylib.h"
 #include "raymath.h"
@@ -388,7 +389,7 @@ void drawHud(const OfflineRuntime& runtime, std::optional<std::size_t> target, b
     if (inventoryOpen) drawInventory(runtime, inventorySelection);
     if (statsOpen) drawStats(runtime);
     drawSkillBar(runtime);
-    DrawText("WASD move | 1-0 skill | F interact | I inventory | C stats | F5 save | ESC select", 18, GetScreenHeight() - 18, 14, LIGHTGRAY);
+    DrawText("WASD move | 1-0 skill | R attack | F interact | I inventory | C stats | F5 save | ESC select", 18, GetScreenHeight() - 18, 14, LIGHTGRAY);
 }
 
 bool runWorld(const ProfileSelection& profile) {
@@ -420,6 +421,7 @@ bool runWorld(const ProfileSelection& profile) {
     runtime.configureProfile(profile.slot, profile.character.name, profile.character.playerClass);
     if (const auto dataPack = locateDataPack(); dataPack.has_value()) runtime.initialize(*dataPack); else runtime.initialize();
     runtime.refreshSkills();
+    premium_plus::GameBridge premiumBridge;
 
     const SmdMap* activeMap = terrain.ready() ? &worldMap : nullptr;
     OfflineNpcSystem npcSystem(profile.slot);
@@ -481,25 +483,47 @@ bool runWorld(const ProfileSelection& profile) {
             runtime.player().position = npcSystem.constrainToMap(activeMap, runtime.player().position, previous);
         }
 
-        const auto target = runtime.nearestAliveMonster(24.0F);
         bool playerAttacked = false;
+        auto triggerSkill = [&](std::size_t index) {
+            if (index >= runtime.skills().size()) return;
+            const auto actionTarget = runtime.nearestAliveMonster(24.0F);
+            const SkillDefinition skill = runtime.skills()[index];
+            Vec3 source = runtime.player().position;
+            source.y = groundHeight(activeMap, source);
+            Vec3 destination = source;
+            if (actionTarget.has_value()) {
+                destination = runtime.monsters()[*actionTarget].position;
+                destination.y = groundHeight(activeMap, destination);
+            }
+            if (runtime.useSkill(index, actionTarget)) {
+                skillVfx.spawn(skill, runtime.player().playerClass, source, destination);
+                playerAttacked = playerAttacked || skill.damage > 0.0F;
+            }
+        };
+
         if (!modal) {
             for (std::size_t index = 0; index < skillKeys.size(); ++index) {
-                if (!IsKeyPressed(skillKeys[index])) continue;
-                const SkillDefinition skill = runtime.skills()[index];
-                Vec3 source = runtime.player().position;
-                source.y = groundHeight(activeMap, source);
-                Vec3 destination = source;
-                if (target.has_value()) {
-                    destination = runtime.monsters()[*target].position;
-                    destination.y = groundHeight(activeMap, destination);
-                }
-                if (runtime.useSkill(index, target)) {
-                    skillVfx.spawn(skill, runtime.player().playerClass, source, destination);
-                    playerAttacked = skill.damage > 0.0F;
-                }
+                if (IsKeyPressed(skillKeys[index])) triggerSkill(index);
             }
+            if (IsKeyPressed(KEY_R)) triggerSkill(0U);
         }
+
+        // The Premium Plus companion publishes every ordered key-down into this
+        // queue once it sees our heartbeat. Drain all pending actions here on the
+        // actual game thread, so 8/9/0/R are not reduced to a 60 Hz keyboard state.
+        // Game rules still decide whether a skill succeeds (cooldown, MP, range).
+        (void) premiumBridge.connected();
+        premiumBridge.drainKeyDowns([&](int virtualKey) {
+            if (modal || !IsWindowFocused()) return;
+            const int slot = premium_plus::skillSlotFromVirtualKey(virtualKey);
+            if (slot >= 0) {
+                triggerSkill(static_cast<std::size_t>(slot));
+            } else if (premium_plus::isBasicAttackKey(virtualKey)) {
+                triggerSkill(0U);
+            }
+        });
+
+        const auto target = runtime.nearestAliveMonster(24.0F);
         if (!npcSystem.modalOpen() && IsKeyPressed(KEY_I)) {
             inventoryOpen = !inventoryOpen;
             statsOpen = false;
@@ -558,7 +582,8 @@ bool runWorld(const ProfileSelection& profile) {
         }
         skillVfx.draw();
         EndMode3D();
-        drawHud(runtime, target, inventoryOpen, statsOpen, inventorySelection, status);
+        drawHud(runtime, target, inventoryOpen, statsOpen, inventorySelection,
+                status + (premiumBridge.connected() ? " | PREMIUM PLUS BRIDGE" : ""));
         npcSystem.drawUi(runtime);
         DrawFPS(GetScreenWidth() - 90, GetScreenHeight() - 28);
         EndDrawing();
