@@ -70,8 +70,7 @@ jobs:
             'ShowCategory',
             'attackBars',
             'BuildAttackSequence',
-            'TOTAL=',
-            'HybridBridgeRouting'
+            'BridgeHybridRouting'
           )) {
             if (-not $code.Contains($need)) { throw "Required fixed behavior missing: $need" }
           }
@@ -127,7 +126,7 @@ jobs:
           if ($p.ExitCode -ne 0) { Get-Content self-test-report.txt -ErrorAction SilentlyContinue; throw "Self-test failed: $($p.ExitCode)" }
           $report=Get-Content self-test-report.txt -Raw
           if ($report -notmatch 'TOTAL=138' -or $report -notmatch 'PASSED=138' -or $report -match '=FAIL') { Get-Content self-test-report.txt; throw 'Self-test is not 138/138 PASS' }
-          foreach ($need in @('HybridBridgeRouting=PASS','AttackSequenceZ_F3_2_F5_5_F1=PASS','SkillBarMapping=PASS','NonCapsHotkeyMapping=PASS')) {
+          foreach ($need in @('BridgeHybridRouting=PASS','AttackPerSkillBarSlotSequence=PASS','SkillBarF1ToF12Mapping=PASS','NonCapsHotkeyMapping=PASS','CureSequenceF2_6_F1=PASS')) {
             if ($report -notmatch [regex]::Escape($need)) { throw "Missing self-test evidence: $need" }
           }
           Get-Content self-test-report.txt | Select-Object -Last 15
