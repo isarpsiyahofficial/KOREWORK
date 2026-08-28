@@ -1,0 +1,214 @@
+name: PremiumPlusCombo Fixed Bridge Category
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [premium-plus-combo-attack-final]
+    paths:
+      - 'premium_plus_combo_final/source/fixed_parts/**'
+      - '.github/workflows/premium-plus-combo-fixed-category.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'premium_plus_combo_final/source/fixed_parts/**'
+      - '.github/workflows/premium-plus-combo-fixed-category.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC x64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Reconstruct fixed source and reference assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = 'premium_plus_combo_final/source'
+          $work = 'premium_plus_combo_final/fixed-build'
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          @'
+          import base64, gzip, pathlib
+          src = pathlib.Path('premium_plus_combo_final/source')
+          out = pathlib.Path('premium_plus_combo_final/fixed-build')
+          chunks = sorted((src / 'fixed_parts').glob('part*.txt'))
+          if len(chunks) != 6:
+              raise SystemExit(f'expected 6 fixed chunks, got {len(chunks)}')
+          packed = ''.join(p.read_text(encoding='utf-8').strip() for p in chunks)
+          code = gzip.decompress(base64.b64decode(packed))
+          (out / 'main.cpp').write_bytes(code)
+          (out / 'left.jpg').write_bytes(base64.b64decode((src / 'left.jpg.b64').read_text(encoding='utf-8').strip()))
+          (out / 'right.jpg').write_bytes(base64.b64decode((src / 'right.jpg.b64').read_text(encoding='utf-8').strip()))
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'fixed source reconstruction failed' }
+
+          $sourceSha=(Get-FileHash "$work/main.cpp" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $leftSha=(Get-FileHash "$work/left.jpg" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $rightSha=(Get-FileHash "$work/right.jpg" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sourceSha -ne '49711f457bb9d4c37426cc7ef8bc713bbeefb9e494aee88898a625b3788b2245') { throw "Fixed source SHA mismatch: $sourceSha" }
+          if ($leftSha -ne '4a6a3dbfbb47e4c55b89f491b8c06925eee206cd9a213a48f1f9625a3d4822ed') { throw "Left asset SHA mismatch: $leftSha" }
+          if ($rightSha -ne '704328405933e1aa423acdf257c6ed6ca985f556d82980a3cbd1e8bf01b94146') { throw "Right asset SHA mismatch: $rightSha" }
+
+          $code = Get-Content "$work/main.cpp" -Raw
+          foreach ($bad in @('CreateProcess','ShellExecute','WinExec','WinHttp','InternetOpen','WSAStartup')) {
+            if ($code.Contains($bad)) { throw "Forbidden launcher/network API: $bad" }
+          }
+          foreach ($need in @(
+            'kWindowWidth = 800',
+            'Local\\PremiumPlusCombo.Rogue.GameBridge.v1',
+            'PublishBridgeEvent',
+            'BridgeReceiverLive',
+            'IDC_CATEGORY_ATTACK',
+            'ShowCategory',
+            'attackBars',
+            'BuildAttackSequence',
+            'TOTAL=',
+            'HybridBridgeRouting'
+          )) {
+            if (-not $code.Contains($need)) { throw "Required fixed behavior missing: $need" }
+          }
+
+          @'
+          #include <windows.h>
+          201 RCDATA "left.jpg"
+          202 RCDATA "right.jpg"
+          1 VERSIONINFO
+           FILEVERSION 3,2,0,0
+           PRODUCTVERSION 3,2,0,0
+           FILEFLAGSMASK 0x3fL
+           FILEFLAGS 0
+           FILEOS 0x40004L
+           FILETYPE 0x1L
+          BEGIN
+           BLOCK "StringFileInfo"
+           BEGIN
+            BLOCK "041F04E6"
+            BEGIN
+             VALUE "CompanyName", "Premium Plus Combo\0"
+             VALUE "FileDescription", "Premium Plus Combo - Rogue / Attack\0"
+             VALUE "FileVersion", "3.2.0.0\0"
+             VALUE "InternalName", "PremiumPlusCombo\0"
+             VALUE "OriginalFilename", "PremiumPlusCombo.exe\0"
+             VALUE "ProductName", "Premium Plus Combo\0"
+             VALUE "ProductVersion", "3.2.0.0\0"
+            END
+           END
+           BLOCK "VarFileInfo"
+           BEGIN
+            VALUE "Translation", 0x041F, 1254
+           END
+          END
+          '@ | Set-Content "$work/app.rc" -Encoding Ascii
+
+      - name: Build one native EXE
+        shell: pwsh
+        working-directory: premium_plus_combo_final/fixed-build
+        run: |
+          $ErrorActionPreference='Stop'
+          rc /nologo app.rc
+          if ($LASTEXITCODE -ne 0) { throw "rc failed: $LASTEXITCODE" }
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib gdiplus.lib advapi32.lib ole32.lib winmm.lib shell32.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+          if ($LASTEXITCODE -ne 0) { throw "cl failed: $LASTEXITCODE" }
+
+      - name: Run 138 behavior and detector self-tests
+        shell: pwsh
+        working-directory: premium_plus_combo_final/fixed-build
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process -FilePath .\PremiumPlusCombo.exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content self-test-report.txt -ErrorAction SilentlyContinue; throw "Self-test failed: $($p.ExitCode)" }
+          $report=Get-Content self-test-report.txt -Raw
+          if ($report -notmatch 'TOTAL=138' -or $report -notmatch 'PASSED=138' -or $report -match '=FAIL') { Get-Content self-test-report.txt; throw 'Self-test is not 138/138 PASS' }
+          foreach ($need in @('HybridBridgeRouting=PASS','AttackSequenceZ_F3_2_F5_5_F1=PASS','SkillBarMapping=PASS','NonCapsHotkeyMapping=PASS')) {
+            if ($report -notmatch [regex]::Escape($need)) { throw "Missing self-test evidence: $need" }
+          }
+          Get-Content self-test-report.txt | Select-Object -Last 15
+
+      - name: Verify x64 single-process static build and bridge string
+        shell: pwsh
+        working-directory: premium_plus_combo_final/fixed-build
+        run: |
+          $ErrorActionPreference='Stop'
+          dumpbin /headers PremiumPlusCombo.exe | Set-Content headers.txt
+          if ((Get-Content headers.txt -Raw) -notmatch 'machine \(x64\)') { throw 'Not x64 PE' }
+          dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
+          $imports=Get-Content imports.txt -Raw
+          foreach ($bad in @('CreateProcess','ShellExecute','WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll')) {
+            if ($imports -match [regex]::Escape($bad)) { throw "Unexpected import: $bad" }
+          }
+          $bytes=[IO.File]::ReadAllBytes((Resolve-Path .\PremiumPlusCombo.exe))
+          $ascii=[Text.Encoding]::ASCII.GetString($bytes)
+          $utf16=[Text.Encoding]::Unicode.GetString($bytes)
+          if (($ascii -notmatch 'PremiumPlusCombo.Rogue.GameBridge.v1') -and ($utf16 -notmatch 'PremiumPlusCombo.Rogue.GameBridge.v1')) { throw 'GameBridge.v1 mapping string missing from final EXE' }
+
+      - name: Microsoft Defender scan
+        shell: pwsh
+        working-directory: premium_plus_combo_final/fixed-build
+        run: |
+          $ErrorActionPreference='Stop'; $mp=$null
+          $direct="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if (Test-Path $direct) { $mp=$direct }
+          if (-not $mp) {
+            $root="$env:ProgramData\Microsoft\Windows Defender\Platform"
+            if (Test-Path $root) {
+              $mp=Get-ChildItem $root -Directory | Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'MpCmdRun.exe' } | Where-Object { Test-Path $_ } | Select-Object -First 1
+            }
+          }
+          if (-not $mp) { throw 'Microsoft Defender CLI unavailable' }
+          & $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo.exe) -DisableRemediation
+          if ($LASTEXITCODE -ne 0) { throw "Defender scan failed/detected threat: $LASTEXITCODE" }
+          'DefenderScan=PASS' | Set-Content defender-scan.txt
+
+      - name: Create final fixed report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/fixed-build
+        run: |
+          $sha=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash
+          $size=(Get-Item PremiumPlusCombo.exe).Length
+          @"
+          Product=PremiumPlusCombo
+          Version=3.2.0.0
+          Packaging=SingleNativeEXE
+          Architecture=x64
+          StaticCRT=PASS
+          LauncherOrCoreEXE=NONE
+          SourceSHA256=49711f457bb9d4c37426cc7ef8bc713bbeefb9e494aee88898a625b3788b2245
+          ReferenceTestedBaseSHA256=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856
+          SelfTest=138/138 PASS
+          DetectorMatrix=132/132 PASS
+          MinorInput=GAMEBRIDGE_V1_FOR_1-0_WITH_SCAN_CODE_FALLBACK
+          MinorMaximumTargetCyclesPerSecond=150
+          MinorTurboTargetCyclesPerSecond=300
+          AttackInput=HYBRID_Z_FBAR_SCAN_CODE_AND_SLOT_GAMEBRIDGE_V1
+          AttackUI=CATEGORY
+          WindowWidth=800
+          AttackPerSkillBarSlot=F1-F12_PLUS_1-0
+          RStopCancellation=EPOCH_CHECK
+          CureExclusivePause=IMPLEMENTED
+          CustomNonCapsHotkey=IMPLEMENTED
+          DefenderScan=PASS
+          SHA256=$sha
+          Size=$size
+          RealGameVerification=USER_SIDE_REQUIRED
+          "@ | Set-Content BUILD-INFO.txt
+          Get-Content BUILD-INFO.txt
+
+      - name: Upload fixed final single EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-Windows-x64-FIXED-BRIDGE-CATEGORY
+          path: |
+            premium_plus_combo_final/fixed-build/PremiumPlusCombo.exe
+            premium_plus_combo_final/fixed-build/BUILD-INFO.txt
+            premium_plus_combo_final/fixed-build/self-test-report.txt
+            premium_plus_combo_final/fixed-build/defender-scan.txt
+          if-no-files-found: error
+          retention-days: 14
