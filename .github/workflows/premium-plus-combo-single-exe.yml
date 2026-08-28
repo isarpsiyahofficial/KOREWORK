@@ -69,7 +69,7 @@ jobs:
           $rightSha = (Get-FileHash "$work/right.jpg" -Algorithm SHA256).Hash.ToLowerInvariant()
 
           if ($sourceSha -ne 'fd8fa88dc85f3b1abf46dec4b07cd0a031d0864873b2160af528aa8aa12492ce') { throw "Source SHA mismatch: $sourceSha" }
-          if ($leftSha -ne 'c452eb9d7b118fecbf80df64c880a69750e14756f066f8a4476c7ce9465c066d') { throw "Left asset SHA mismatch: $leftSha" }
+          if ($leftSha -ne '4a6a3dbfbb47e4c55b89f491b8c06925eee206cd9a213a48f1f9625a3d4822ed') { throw "Left asset SHA mismatch: $leftSha" }
           if ($rightSha -ne '704328405933e1aa423acdf257c6ed6ca985f556d82980a3cbd1e8bf01b94146') { throw "Right asset SHA mismatch: $rightSha" }
 
           @'
@@ -146,7 +146,7 @@ jobs:
           StaticCRT=PASS
           SelfTest=PASS
           SourceSHA256=fd8fa88dc85f3b1abf46dec4b07cd0a031d0864873b2160af528aa8aa12492ce
-          LeftReferenceAssetSHA256=c452eb9d7b118fecbf80df64c880a69750e14756f066f8a4476c7ce9465c066d
+          LeftReferenceAssetSHA256=4a6a3dbfbb47e4c55b89f491b8c06925eee206cd9a213a48f1f9625a3d4822ed
           RightReferenceAssetSHA256=704328405933e1aa423acdf257c6ed6ca985f556d82980a3cbd1e8bf01b94146
           SHA256=$sha
           Size=$size
