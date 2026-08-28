@@ -39,12 +39,26 @@ jobs:
           New-Item -ItemType Directory -Force -Path $work | Out-Null
 
           @'
-          import base64, gzip, pathlib
+          import base64, pathlib, struct, zlib
           src = pathlib.Path('premium_plus_combo_final/source')
           out = pathlib.Path('premium_plus_combo_final/build')
           out.mkdir(parents=True, exist_ok=True)
           packed = base64.b64decode((src / 'main.cpp.gz.b64').read_text(encoding='utf-8').strip())
-          (out / 'main.cpp').write_bytes(gzip.decompress(packed))
+          if packed[:3] != b'\x1f\x8b\x08':
+              raise SystemExit('invalid gzip header')
+          flags = packed[3]
+          p = 10
+          if flags & 0x04:
+              xlen = struct.unpack_from('<H', packed, p)[0]
+              p += 2 + xlen
+          if flags & 0x08:
+              p = packed.index(b'\x00', p) + 1
+          if flags & 0x10:
+              p = packed.index(b'\x00', p) + 1
+          if flags & 0x02:
+              p += 2
+          source = zlib.decompress(packed[p:-8], -15)
+          (out / 'main.cpp').write_bytes(source)
           (out / 'left.jpg').write_bytes(base64.b64decode((src / 'left.jpg.b64').read_text(encoding='utf-8').strip()))
           (out / 'right.jpg').write_bytes(base64.b64decode((src / 'right.jpg.b64').read_text(encoding='utf-8').strip()))
           '@ | python -
