@@ -39,7 +39,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $work | Out-Null
 
           $compressed = [Convert]::FromBase64String((Get-Content "$srcDir/main.cpp.gz.b64" -Raw).Trim())
-          $ms = [IO.MemoryStream]::new(,$compressed)
+          $ms = [IO.MemoryStream]::new($compressed)
           $gz = [IO.Compression.GZipStream]::new($ms, [IO.Compression.CompressionMode]::Decompress)
           $out = [IO.File]::Create("$work/main.cpp")
           $gz.CopyTo($out)
