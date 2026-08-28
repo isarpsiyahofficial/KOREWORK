@@ -1,0 +1,143 @@
+name: PremiumPlusCombo Single EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - premium-plus-combo-attack-final
+    paths:
+      - 'premium_plus_combo_final/source/**'
+      - '.github/workflows/premium-plus-combo-single-exe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Reconstruct verified source and assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $srcDir = 'premium_plus_combo_final/source'
+          $work = 'premium_plus_combo_final/build'
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+
+          $compressed = [Convert]::FromBase64String((Get-Content "$srcDir/main.cpp.gz.b64" -Raw).Trim())
+          $ms = [IO.MemoryStream]::new(,$compressed)
+          $gz = [IO.Compression.GZipStream]::new($ms, [IO.Compression.CompressionMode]::Decompress)
+          $out = [IO.File]::Create("$work/main.cpp")
+          $gz.CopyTo($out)
+          $out.Dispose(); $gz.Dispose(); $ms.Dispose()
+
+          [IO.File]::WriteAllBytes("$work/left.jpg", [Convert]::FromBase64String((Get-Content "$srcDir/left.jpg.b64" -Raw).Trim()))
+          [IO.File]::WriteAllBytes("$work/right.jpg", [Convert]::FromBase64String((Get-Content "$srcDir/right.jpg.b64" -Raw).Trim()))
+
+          $sourceSha = (Get-FileHash "$work/main.cpp" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $leftSha = (Get-FileHash "$work/left.jpg" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $rightSha = (Get-FileHash "$work/right.jpg" -Algorithm SHA256).Hash.ToLowerInvariant()
+
+          if ($sourceSha -ne 'a92ea50fa2a6396fc8dce7a3bc4f1aeab0f9c204ee3cbdc63ff027c931e4d359') { throw "Source SHA mismatch: $sourceSha" }
+          if ($leftSha -ne 'c452eb9d7b118fecbf80df64c880a69750e14756f066f8a4476c7ce9465c066d') { throw "Left asset SHA mismatch: $leftSha" }
+          if ($rightSha -ne '704328405933e1aa423acdf257c6ed6ca985f556d82980a3cbd1e8bf01b94146') { throw "Right asset SHA mismatch: $rightSha" }
+
+          @'
+          #include <windows.h>
+          201 RCDATA "left.jpg"
+          202 RCDATA "right.jpg"
+          1 VERSIONINFO
+           FILEVERSION 3,0,0,0
+           PRODUCTVERSION 3,0,0,0
+           FILEFLAGSMASK 0x3fL
+           FILEFLAGS 0
+           FILEOS 0x40004L
+           FILETYPE 0x1L
+          BEGIN
+           BLOCK "StringFileInfo"
+           BEGIN
+            BLOCK "040904B0"
+            BEGIN
+             VALUE "CompanyName", "Premium Plus Combo\0"
+             VALUE "FileDescription", "Premium Plus Combo - Rogue\0"
+             VALUE "FileVersion", "3.0.0.0\0"
+             VALUE "InternalName", "PremiumPlusCombo\0"
+             VALUE "OriginalFilename", "PremiumPlusCombo.exe\0"
+             VALUE "ProductName", "Premium Plus Combo\0"
+             VALUE "ProductVersion", "3.0.0.0\0"
+            END
+           END
+           BLOCK "VarFileInfo"
+           BEGIN
+            VALUE "Translation", 0x0409, 1200
+           END
+          END
+          '@ | Set-Content "$work/app.rc" -Encoding Ascii
+
+      - name: Build single native EXE
+        shell: pwsh
+        working-directory: premium_plus_combo_final/build
+        run: |
+          $ErrorActionPreference = 'Stop'
+          rc /nologo app.rc
+          if ($LASTEXITCODE -ne 0) { throw "rc failed: $LASTEXITCODE" }
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DUNICODE /D_UNICODE main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib gdiplus.lib advapi32.lib ole32.lib winmm.lib shell32.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+          if ($LASTEXITCODE -ne 0) { throw "cl failed: $LASTEXITCODE" }
+
+      - name: Run executable self-test
+        shell: pwsh
+        working-directory: premium_plus_combo_final/build
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\PremiumPlusCombo.exe --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Self-test failed: $LASTEXITCODE" }
+          'SelfTest=PASS' | Set-Content self-test.txt
+
+      - name: Verify PE architecture and package metadata
+        shell: pwsh
+        working-directory: premium_plus_combo_final/build
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dumpbin /headers PremiumPlusCombo.exe | Tee-Object -FilePath headers.txt
+          if ($LASTEXITCODE -ne 0) { throw "dumpbin failed" }
+          $headers = Get-Content headers.txt -Raw
+          if ($headers -notmatch 'machine \(x64\)') { throw 'Not an x64 PE' }
+
+          dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
+          $imports = Get-Content imports.txt -Raw
+          if ($imports -match 'CreateProcess') { throw 'Unexpected process-launch import detected' }
+
+          $sha = (Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash
+          $size = (Get-Item PremiumPlusCombo.exe).Length
+          @"
+          Product=PremiumPlusCombo
+          Packaging=SingleNativeEXE
+          Architecture=x64
+          StaticCRT=PASS
+          SelfTest=PASS
+          SourceSHA256=a92ea50fa2a6396fc8dce7a3bc4f1aeab0f9c204ee3cbdc63ff027c931e4d359
+          LeftReferenceAssetSHA256=c452eb9d7b118fecbf80df64c880a69750e14756f066f8a4476c7ce9465c066d
+          RightReferenceAssetSHA256=704328405933e1aa423acdf257c6ed6ca985f556d82980a3cbd1e8bf01b94146
+          SHA256=$sha
+          Size=$size
+          "@ | Set-Content BUILD-INFO.txt
+          Get-Content BUILD-INFO.txt
+
+      - name: Upload single EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-Windows-x64-SINGLE-EXE
+          path: |
+            premium_plus_combo_final/build/PremiumPlusCombo.exe
+            premium_plus_combo_final/build/BUILD-INFO.txt
+            premium_plus_combo_final/build/self-test.txt
+          if-no-files-found: error
+          retention-days: 14
