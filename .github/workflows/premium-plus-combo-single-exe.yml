@@ -97,8 +97,8 @@ jobs:
         working-directory: premium_plus_combo_final/build
         run: |
           $ErrorActionPreference='Stop'
-          & .\PremiumPlusCombo.exe --self-test
-          if ($LASTEXITCODE -ne 0) { Get-Content self-test-report.txt -ErrorAction SilentlyContinue; throw "Self-test failed: $LASTEXITCODE" }
+          $p = Start-Process -FilePath .\PremiumPlusCombo.exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content self-test-report.txt -ErrorAction SilentlyContinue; throw "Self-test failed: $($p.ExitCode)" }
           $report=Get-Content self-test-report.txt -Raw
           if ($report -notmatch 'TOTAL=137' -or $report -notmatch 'PASSED=137' -or $report -match '=FAIL') { throw 'Self-test is not 137/137 PASS' }
           Get-Content self-test-report.txt | Select-Object -Last 12
