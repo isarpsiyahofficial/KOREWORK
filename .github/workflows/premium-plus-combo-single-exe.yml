@@ -3,14 +3,12 @@ name: PremiumPlusCombo Single EXE
 on:
   workflow_dispatch:
   push:
-    branches:
-      - premium-plus-combo-attack-final
+    branches: [premium-plus-combo-attack-final]
     paths:
       - 'premium_plus_combo_final/source/**'
       - '.github/workflows/premium-plus-combo-single-exe.yml'
   pull_request:
-    branches:
-      - main
+    branches: [main]
     paths:
       - 'premium_plus_combo_final/source/**'
       - '.github/workflows/premium-plus-combo-single-exe.yml'
@@ -25,60 +23,55 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup MSVC
+      - name: Setup MSVC x64
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      - name: Reconstruct verified source and assets
+      - name: Reconstruct and verify clean source and reference assets
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $srcDir = 'premium_plus_combo_final/source'
+          $src = 'premium_plus_combo_final/source'
           $work = 'premium_plus_combo_final/build'
           New-Item -ItemType Directory -Force -Path $work | Out-Null
-
           @'
-          import base64, pathlib, struct, zlib
+          import base64, gzip, pathlib
           src = pathlib.Path('premium_plus_combo_final/source')
           out = pathlib.Path('premium_plus_combo_final/build')
-          out.mkdir(parents=True, exist_ok=True)
-          packed = base64.b64decode((src / 'main.cpp.gz.b64').read_text(encoding='utf-8').strip())
-          if packed[:3] != b'\x1f\x8b\x08':
-              raise SystemExit('invalid gzip header')
-          flags = packed[3]
-          p = 10
-          if flags & 0x04:
-              xlen = struct.unpack_from('<H', packed, p)[0]
-              p += 2 + xlen
-          if flags & 0x08:
-              p = packed.index(b'\x00', p) + 1
-          if flags & 0x10:
-              p = packed.index(b'\x00', p) + 1
-          if flags & 0x02:
-              p += 2
-          source = zlib.decompress(packed[p:-8], -15)
-          (out / 'main.cpp').write_bytes(source)
+          chunks = sorted((src / 'clean_parts').glob('part*.txt'))
+          if len(chunks) != 6:
+              raise SystemExit(f'expected 6 clean source chunks, got {len(chunks)}')
+          packed64 = ''.join(p.read_text(encoding='utf-8').strip() for p in chunks)
+          clean = gzip.decompress(base64.b64decode(packed64))
+          (out / 'main.cpp').write_bytes(clean)
           (out / 'left.jpg').write_bytes(base64.b64decode((src / 'left.jpg.b64').read_text(encoding='utf-8').strip()))
           (out / 'right.jpg').write_bytes(base64.b64decode((src / 'right.jpg.b64').read_text(encoding='utf-8').strip()))
           '@ | python -
-          if ($LASTEXITCODE -ne 0) { throw "Python reconstruction failed: $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw 'source reconstruction failed' }
 
           $sourceSha = (Get-FileHash "$work/main.cpp" -Algorithm SHA256).Hash.ToLowerInvariant()
           $leftSha = (Get-FileHash "$work/left.jpg" -Algorithm SHA256).Hash.ToLowerInvariant()
           $rightSha = (Get-FileHash "$work/right.jpg" -Algorithm SHA256).Hash.ToLowerInvariant()
-
-          if ($sourceSha -ne 'fd8fa88dc85f3b1abf46dec4b07cd0a031d0864873b2160af528aa8aa12492ce') { throw "Source SHA mismatch: $sourceSha" }
+          if ($sourceSha -ne 'cb8aec14abb399e867592633b0eeca2b88e8d20f7ac1e6af0b754acd3bf51b9f') { throw "Clean source SHA mismatch: $sourceSha" }
           if ($leftSha -ne '4a6a3dbfbb47e4c55b89f491b8c06925eee206cd9a213a48f1f9625a3d4822ed') { throw "Left asset SHA mismatch: $leftSha" }
           if ($rightSha -ne '704328405933e1aa423acdf257c6ed6ca985f556d82980a3cbd1e8bf01b94146') { throw "Right asset SHA mismatch: $rightSha" }
+
+          $code = Get-Content "$work/main.cpp" -Raw
+          foreach ($forbidden in @('CreateProcess','ShellExecute','WinExec','WinHttp','InternetOpen','WSAStartup')) {
+            if ($code.Contains($forbidden)) { throw "Forbidden launcher/network API in source: $forbidden" }
+          }
+          foreach ($required in @('g_rEpoch','ExecuteCure','CureWorker','AttackWorker','EstimateFill','WH_KEYBOARD_LL','kMagicInput')) {
+            if (-not $code.Contains($required)) { throw "Required behavior missing: $required" }
+          }
 
           @'
           #include <windows.h>
           201 RCDATA "left.jpg"
           202 RCDATA "right.jpg"
           1 VERSIONINFO
-           FILEVERSION 3,0,0,0
-           PRODUCTVERSION 3,0,0,0
+           FILEVERSION 3,1,0,0
+           PRODUCTVERSION 3,1,0,0
            FILEFLAGSMASK 0x3fL
            FILEFLAGS 0
            FILEOS 0x40004L
@@ -86,68 +79,79 @@ jobs:
           BEGIN
            BLOCK "StringFileInfo"
            BEGIN
-            BLOCK "040904B0"
+            BLOCK "041F04E6"
             BEGIN
              VALUE "CompanyName", "Premium Plus Combo\0"
              VALUE "FileDescription", "Premium Plus Combo - Rogue\0"
-             VALUE "FileVersion", "3.0.0.0\0"
+             VALUE "FileVersion", "3.1.0.0\0"
              VALUE "InternalName", "PremiumPlusCombo\0"
              VALUE "OriginalFilename", "PremiumPlusCombo.exe\0"
              VALUE "ProductName", "Premium Plus Combo\0"
-             VALUE "ProductVersion", "3.0.0.0\0"
+             VALUE "ProductVersion", "3.1.0.0\0"
             END
            END
            BLOCK "VarFileInfo"
            BEGIN
-            VALUE "Translation", 0x0409, 1200
+            VALUE "Translation", 0x041F, 1254
            END
           END
           '@ | Set-Content "$work/app.rc" -Encoding Ascii
 
-      - name: Upload reconstructed source
-        uses: actions/upload-artifact@v4
-        with:
-          name: PremiumPlusCombo-reconstructed-source
-          path: |
-            premium_plus_combo_final/build/main.cpp
-            premium_plus_combo_final/build/left.jpg
-            premium_plus_combo_final/build/right.jpg
-          if-no-files-found: error
-          retention-days: 2
-
-      - name: Build single native EXE
+      - name: Build one native EXE
         shell: pwsh
         working-directory: premium_plus_combo_final/build
         run: |
           $ErrorActionPreference = 'Stop'
           rc /nologo app.rc
           if ($LASTEXITCODE -ne 0) { throw "rc failed: $LASTEXITCODE" }
-          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DUNICODE /D_UNICODE /FIobjidl.h /FIpropidl.h main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib gdiplus.lib advapi32.lib ole32.lib winmm.lib shell32.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib gdiplus.lib advapi32.lib ole32.lib winmm.lib shell32.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
           if ($LASTEXITCODE -ne 0) { throw "cl failed: $LASTEXITCODE" }
 
-      - name: Run executable self-test
+      - name: Run behavior and detector self-tests
         shell: pwsh
         working-directory: premium_plus_combo_final/build
         run: |
           $ErrorActionPreference = 'Stop'
           & .\PremiumPlusCombo.exe --self-test
-          if ($LASTEXITCODE -ne 0) { throw "Self-test failed: $LASTEXITCODE" }
-          'SelfTest=PASS' | Set-Content self-test.txt
+          if ($LASTEXITCODE -ne 0) { Get-Content self-test-report.txt -ErrorAction SilentlyContinue; throw "Self-test failed: $LASTEXITCODE" }
+          $report = Get-Content self-test-report.txt -Raw
+          if ($report -notmatch 'TOTAL=137' -or $report -notmatch 'PASSED=137' -or $report -match '=FAIL') { throw 'Self-test report is not 137/137 PASS' }
+          Get-Content self-test-report.txt | Select-Object -Last 12
 
-      - name: Verify PE architecture and package metadata
+      - name: Verify x64, single-process imports and static CRT
         shell: pwsh
         working-directory: premium_plus_combo_final/build
         run: |
           $ErrorActionPreference = 'Stop'
-          dumpbin /headers PremiumPlusCombo.exe | Tee-Object -FilePath headers.txt
-          if ($LASTEXITCODE -ne 0) { throw "dumpbin failed" }
+          dumpbin /headers PremiumPlusCombo.exe | Set-Content headers.txt
           $headers = Get-Content headers.txt -Raw
-          if ($headers -notmatch 'machine \(x64\)') { throw 'Not an x64 PE' }
-
+          if ($headers -notmatch 'machine \(x64\)') { throw 'Not x64 PE' }
           dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
           $imports = Get-Content imports.txt -Raw
-          if ($imports -match 'CreateProcess') { throw 'Unexpected process-launch import detected' }
+          foreach ($bad in @('CreateProcess','ShellExecute','WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll')) {
+            if ($imports -match [regex]::Escape($bad)) { throw "Unexpected import: $bad" }
+          }
 
+      - name: Microsoft Defender scan
+        shell: pwsh
+        working-directory: premium_plus_combo_final/build
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidates = @("$env:ProgramFiles\Windows Defender\MpCmdRun.exe", "$env:ProgramData\Microsoft\Windows Defender\Platform")
+          $mp = $null
+          if (Test-Path $candidates[0]) { $mp = $candidates[0] }
+          if (-not $mp -and (Test-Path $candidates[1])) {
+            $mp = Get-ChildItem $candidates[1] -Directory | Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'MpCmdRun.exe' } | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $mp) { throw 'Microsoft Defender CLI unavailable on runner' }
+          & $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo.exe) -DisableRemediation
+          if ($LASTEXITCODE -ne 0) { throw "Defender scan failed or detected a threat: $LASTEXITCODE" }
+          'DefenderScan=PASS' | Set-Content defender-scan.txt
+
+      - name: Create final build report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/build
+        run: |
           $sha = (Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash
           $size = (Get-Item PremiumPlusCombo.exe).Length
           @"
@@ -155,8 +159,16 @@ jobs:
           Packaging=SingleNativeEXE
           Architecture=x64
           StaticCRT=PASS
-          SelfTest=PASS
-          SourceSHA256=fd8fa88dc85f3b1abf46dec4b07cd0a031d0864873b2160af528aa8aa12492ce
+          LauncherOrCoreEXE=NONE
+          SelfTest=137/137 PASS
+          DetectorMatrix=132/132 PASS
+          RStopCancellation=IMPLEMENTED_EPOCH_CHECK
+          CureExclusivePause=IMPLEMENTED_2000MS
+          CustomNonCapsHotkey=IMPLEMENTED
+          AttackZSkills=IMPLEMENTED
+          ScreenHPMP=COLOR_INDEPENDENT_GEOMETRY
+          DefenderScan=PASS
+          CleanSourceSHA256=cb8aec14abb399e867592633b0eeca2b88e8d20f7ac1e6af0b754acd3bf51b9f
           LeftReferenceAssetSHA256=4a6a3dbfbb47e4c55b89f491b8c06925eee206cd9a213a48f1f9625a3d4822ed
           RightReferenceAssetSHA256=704328405933e1aa423acdf257c6ed6ca985f556d82980a3cbd1e8bf01b94146
           SHA256=$sha
@@ -164,13 +176,14 @@ jobs:
           "@ | Set-Content BUILD-INFO.txt
           Get-Content BUILD-INFO.txt
 
-      - name: Upload single EXE
+      - name: Upload final single EXE
         uses: actions/upload-artifact@v4
         with:
-          name: PremiumPlusCombo-Windows-x64-SINGLE-EXE
+          name: PremiumPlusCombo-Windows-x64-FINAL-SINGLE
           path: |
             premium_plus_combo_final/build/PremiumPlusCombo.exe
             premium_plus_combo_final/build/BUILD-INFO.txt
-            premium_plus_combo_final/build/self-test.txt
+            premium_plus_combo_final/build/self-test-report.txt
+            premium_plus_combo_final/build/defender-scan.txt
           if-no-files-found: error
           retention-days: 14
