@@ -111,7 +111,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           rc /nologo app.rc
           if ($LASTEXITCODE -ne 0) { throw "rc failed: $LASTEXITCODE" }
-          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DUNICODE /D_UNICODE main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib gdiplus.lib advapi32.lib ole32.lib winmm.lib shell32.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DUNICODE /D_UNICODE /FIobjidl.h /FIpropidl.h main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib gdiplus.lib advapi32.lib ole32.lib winmm.lib shell32.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
           if ($LASTEXITCODE -ne 0) { throw "cl failed: $LASTEXITCODE" }
 
       - name: Run executable self-test
