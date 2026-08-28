@@ -104,6 +104,17 @@ jobs:
           END
           '@ | Set-Content "$work/app.rc" -Encoding Ascii
 
+      - name: Upload reconstructed source
+        uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-reconstructed-source
+          path: |
+            premium_plus_combo_final/build/main.cpp
+            premium_plus_combo_final/build/left.jpg
+            premium_plus_combo_final/build/right.jpg
+          if-no-files-found: error
+          retention-days: 2
+
       - name: Build single native EXE
         shell: pwsh
         working-directory: premium_plus_combo_final/build
