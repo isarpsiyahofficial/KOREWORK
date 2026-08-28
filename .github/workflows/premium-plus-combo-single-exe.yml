@@ -38,15 +38,17 @@ jobs:
           $work = 'premium_plus_combo_final/build'
           New-Item -ItemType Directory -Force -Path $work | Out-Null
 
-          $compressed = [Convert]::FromBase64String((Get-Content "$srcDir/main.cpp.gz.b64" -Raw).Trim())
-          $ms = [IO.MemoryStream]::new($compressed)
-          $gz = [IO.Compression.GZipStream]::new($ms, [IO.Compression.CompressionMode]::Decompress)
-          $out = [IO.File]::Create("$work/main.cpp")
-          $gz.CopyTo($out)
-          $out.Dispose(); $gz.Dispose(); $ms.Dispose()
-
-          [IO.File]::WriteAllBytes("$work/left.jpg", [Convert]::FromBase64String((Get-Content "$srcDir/left.jpg.b64" -Raw).Trim()))
-          [IO.File]::WriteAllBytes("$work/right.jpg", [Convert]::FromBase64String((Get-Content "$srcDir/right.jpg.b64" -Raw).Trim()))
+          @'
+          import base64, gzip, pathlib
+          src = pathlib.Path('premium_plus_combo_final/source')
+          out = pathlib.Path('premium_plus_combo_final/build')
+          out.mkdir(parents=True, exist_ok=True)
+          packed = base64.b64decode((src / 'main.cpp.gz.b64').read_text(encoding='utf-8').strip())
+          (out / 'main.cpp').write_bytes(gzip.decompress(packed))
+          (out / 'left.jpg').write_bytes(base64.b64decode((src / 'left.jpg.b64').read_text(encoding='utf-8').strip()))
+          (out / 'right.jpg').write_bytes(base64.b64decode((src / 'right.jpg.b64').read_text(encoding='utf-8').strip()))
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw "Python reconstruction failed: $LASTEXITCODE" }
 
           $sourceSha = (Get-FileHash "$work/main.cpp" -Algorithm SHA256).Hash.ToLowerInvariant()
           $leftSha = (Get-FileHash "$work/left.jpg" -Algorithm SHA256).Hash.ToLowerInvariant()
