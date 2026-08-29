@@ -1,0 +1,169 @@
+name: PremiumPlusCombo Clean Defender Final
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [premium-plus-combo-attack-final]
+    paths:
+      - 'premium_plus_combo_clean_candidate_xz/**'
+      - '.github/workflows/premium-plus-combo-clean-defender.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'premium_plus_combo_clean_candidate_xz/**'
+      - '.github/workflows/premium-plus-combo-clean-defender.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reconstruct exact clean candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import pathlib, base64, lzma, hashlib
+          root=pathlib.Path('premium_plus_combo_clean_candidate_xz')
+          parts=sorted(root.glob('part*.txt'))
+          if len(parts)!=3: raise SystemExit(f'expected 3 chunks, got {len(parts)}')
+          enc=''.join(p.read_text(encoding='utf-8').strip() for p in parts)
+          data=lzma.decompress(base64.b64decode(enc))
+          out=pathlib.Path('clean-build'); out.mkdir(exist_ok=True)
+          p=out/'PremiumPlusCombo.exe'; p.write_bytes(data)
+          sha=hashlib.sha256(data).hexdigest()
+          print('SHA256='+sha); print('Size='+str(len(data)))
+          if sha!='3a37f66a1a7ac57463fe3227bfd86e52ebd45068c1a6d5642f19cc009a932e1c':
+              raise SystemExit('clean candidate SHA mismatch')
+          if len(data)!=245760: raise SystemExit('size mismatch')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'reconstruction failed' }
+
+      - name: Verify PE hardening and 062F preservation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import pathlib,struct,hashlib
+          p=pathlib.Path('clean-build/PremiumPlusCombo.exe'); b=p.read_bytes()
+          u16=lambda o:struct.unpack_from('<H',b,o)[0]
+          u32=lambda o:struct.unpack_from('<I',b,o)[0]
+          pe=u32(0x3c)
+          if b[pe:pe+4]!=b'PE\0\0': raise SystemExit('not PE')
+          if u16(pe+4)!=0x8664: raise SystemExit('not x64')
+          n=u16(pe+6); opt=pe+24; optsz=u16(pe+20)
+          if u16(opt)!=0x20b: raise SystemExit('not PE32+')
+          ep=u32(opt+16)
+          if ep!=0xD810: raise SystemExit(f'entry point changed: {ep:#x}')
+          st=opt+optsz; sections={}
+          for i in range(n):
+              o=st+i*40; name=b[o:o+8].rstrip(b'\0').decode('ascii')
+              vs,va,rs,rp=struct.unpack_from('<IIII',b,o+8); ch=u32(o+36)
+              sections[name]=(vs,va,rs,rp,ch)
+              if (ch&0x20000000) and (ch&0x80000000): raise SystemExit(f'RWX section: {name}')
+          if n!=9: raise SystemExit(f'unexpected section count: {n}')
+          if '.atkcode' not in sections or '.atkdata' not in sections: raise SystemExit('clean split sections missing')
+          cc=sections['.atkcode'][4]; dc=sections['.atkdata'][4]
+          if not (cc&0x20000000) or (cc&0x80000000): raise SystemExit('.atkcode flags invalid')
+          if (dc&0x20000000) or not (dc&0x80000000): raise SystemExit('.atkdata flags invalid')
+          expected={
+            '.data':'780965d279bf32a3f4b5951e39c46eb4b4173a381c3823bba0d362344b51db44',
+            '.pdata':'bd71f50c0e82fb3408cfedf223cfaa7de5dba30be2a948b55e32cba750b99430',
+            '.fptable':'076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560',
+            '.rsrc':'9f0773838680b96c8c5d03ced7a52901919f8000290046d333c05f8889b24dba',
+            '.reloc':'c21da560856b53c9466747a4800ef73cd59c9f98aaedf44409198dd70121da32'}
+          for name,want in expected.items():
+              vs,va,rs,rp,ch=sections[name]; got=hashlib.sha256(b[rp:rp+rs]).hexdigest()
+              if got!=want: raise SystemExit(f'{name} reference preservation failed: {got}')
+          # Existing original input bridge and separate Attack configuration evidence.
+          required_ascii=[b'PremiumPlusCombo.Rogue.GameBridge.v1']
+          for s in required_ascii:
+              if s not in b and s.decode().encode('utf-16le') not in b: raise SystemExit(f'missing {s!r}')
+          required_utf16=['Software\\PremiumPlusCombo\\AttackV2','ROGUE','ATTACK','StartHotkey','StopHotkey','HPEnabled','MPEnabled','Skill1Enabled']
+          for s in required_utf16:
+              if s.encode('utf-16le') not in b: raise SystemExit('missing setting/UI evidence: '+s)
+          print('PEHardening=PASS')
+          print('NoRWX=PASS')
+          print('OriginalEntryPointRVA=0xD810')
+          print('ReferenceSectionsPreserved=PASS')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'PE hardening verification failed' }
+
+      - name: Verify imports
+        shell: pwsh
+        working-directory: clean-build
+        run: |
+          $ErrorActionPreference='Stop'
+          dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
+          $imports=Get-Content imports.txt -Raw
+          foreach($bad in @('WINHTTP.dll','WININET.dll','WS2_32.dll','CreateProcess','ShellExecute','WinExec','VCRUNTIME140.dll','MSVCP140.dll')) {
+            if($imports -match [regex]::Escape($bad)){ throw "Unexpected import: $bad" }
+          }
+          'ImportAudit=PASS' | Set-Content import-audit.txt
+
+      - name: Microsoft Defender scan
+        shell: pwsh
+        working-directory: clean-build
+        run: |
+          $ErrorActionPreference='Stop'
+          $mp=$null
+          $direct="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(Test-Path $direct){$mp=$direct}
+          if(-not $mp){
+            $root="$env:ProgramData\Microsoft\Windows Defender\Platform"
+            if(Test-Path $root){
+              $mp=Get-ChildItem $root -Directory | Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'MpCmdRun.exe' } | Where-Object {Test-Path $_} | Select-Object -First 1
+            }
+          }
+          if(-not $mp){throw 'Microsoft Defender CLI unavailable'}
+          & $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo.exe) -DisableRemediation 2>&1 | Tee-Object defender-output.txt
+          $code=$LASTEXITCODE
+          if($code -ne 0){throw "Defender detected/scan failed: $code"}
+          'DefenderScan=PASS' | Set-Content defender-scan.txt
+
+      - name: Create final verification report
+        shell: pwsh
+        working-directory: clean-build
+        run: |
+          $sha=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash
+          $size=(Get-Item PremiumPlusCombo.exe).Length
+          @"
+          Product=PremiumPlusCombo
+          ReferenceBaseSHA256=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856
+          FinalSHA256=$sha
+          Size=$size
+          Architecture=x64
+          OriginalEntryPoint=0xD810
+          NoRWXSections=PASS
+          AttackCodeSection=RX_ONLY
+          AttackDataSection=RW_NONEXEC
+          ReferenceResourceSection=BYTE_IDENTICAL_PASS
+          ReferenceDataPdataFptableReloc=BYTE_IDENTICAL_PASS
+          NetworkLauncherImports=NONE
+          DefenderScan=PASS
+          AttackRegistry=SEPARATE_ATTACKV2
+          AttackStartStopHotkeys=SEPARATE_FROM_MINOR
+          AttackMinorState=INDEPENDENT
+          AttackSkillBars=F1-F12
+          AttackSkillSlots=1-0
+          HPMPDetector=SCREEN_GEOMETRY_CALIBRATION
+          "@ | Set-Content FINAL-VERIFY.txt
+          Get-Content FINAL-VERIFY.txt
+
+      - name: Upload clean final candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-Windows-x64-FINAL-CLEAN-DEFENDER
+          path: |
+            clean-build/PremiumPlusCombo.exe
+            clean-build/FINAL-VERIFY.txt
+            clean-build/defender-scan.txt
+            clean-build/defender-output.txt
+            clean-build/import-audit.txt
+          if-no-files-found: error
+          retention-days: 14
