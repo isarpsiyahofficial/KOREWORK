@@ -21,28 +21,42 @@ jobs:
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force premium_plus_combo_final/fifo-build | Out-Null
           @'
-          import base64,gzip,pathlib,hashlib
-          def unpack(folder,pattern):
-              parts=sorted(pathlib.Path(folder).glob(pattern))
-              print(folder,'chunks',len(parts),[len(x.read_text().strip()) for x in parts])
-              return gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in parts)))
-          mod=unpack('premium_plus_combo_final/source/fifo_transport_v2','c*.txt')
+          import base64,gzip,pathlib,hashlib,string
+          root=pathlib.Path('premium_plus_combo_final/source/fifo_transport_v2')
+          names=['c00.txt','c01.txt','c02.txt','c03a.txt','c03b.txt','c04.txt','c05.txt','c06.txt']
+          chunks=[(root/n).read_text().strip() for n in names]
+          expected_chunk='fa32dcbd4a8230df6a9e50285b2a5c9aa74a35f99a5136e8f4a2b5abde800708'
+          if hashlib.sha256(chunks[3].encode()).hexdigest()!=expected_chunk:
+              if len(chunks[3])!=1749: raise SystemExit('unexpected c03a length/hash')
+              alphabet=string.ascii_uppercase+string.ascii_lowercase+string.digits+'+/'
+              found=None
+              for pos in range(len(chunks[3])+1):
+                  pre=chunks[3][:pos]; post=chunks[3][pos:]
+                  for ch in alphabet:
+                      cand=pre+ch+post
+                      if hashlib.sha256(cand.encode()).hexdigest()==expected_chunk:
+                          found=cand; break
+                  if found is not None: break
+              if found is None: raise SystemExit('unable to repair c03a')
+              chunks[3]=found
+              print('c03a repaired and exact chunk SHA verified')
+          text=''.join(chunks)
+          if len(text)!=22620 or hashlib.sha256(text.encode()).hexdigest()!='f051ca3c58ed1f8e17b7ecbfa9b46907cf7c5f2abb42ce3885b3c5a4bdb10697':
+              raise SystemExit('joined base64 SHA mismatch')
+          mod=gzip.decompress(base64.b64decode(text))
           if hashlib.sha256(mod).hexdigest()!='08bb8807b2aa2e3cf416cc8ff417ebbb245bde3128cffe4faf2b7349d82fc8db':
               raise SystemExit('FIFO source SHA mismatch')
-          base=unpack('premium_plus_combo_final/source/timed_exact','part*.txt')
+          bp=pathlib.Path('premium_plus_combo_final/source/timed_exact')
+          base=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in sorted(bp.glob('part*.txt')))))
           if hashlib.sha256(base).hexdigest()!='d522959ea955ef788af1df00dfff2dd30bd8566fcbb728823ed39de542d19535':
               raise SystemExit('baseline source SHA mismatch')
           bs=base.decode('utf-8'); ms=mod.decode('utf-8')
-          if bs[:bs.index('HINSTANCE g_instance{}')] != ms[:ms.index('HINSTANCE g_instance{}')]:
-              raise SystemExit('identity/struct/UI constants changed')
-          if bs[bs.index('DWORD ReadDword'):bs.index('bool InitBridge')] != ms[ms.index('DWORD ReadDword'):ms.index('bool InitBridge')]:
-              raise SystemExit('registry/settings code changed')
-          if bs[bs.index('std::wstring KeyName'):bs.index('bool ConflictWithRogue')] != ms[ms.index('std::wstring KeyName'):ms.index('bool ConflictWithRogue')]:
-              raise SystemExit('hotkey labels/power/UI helper code changed')
+          if bs[:bs.index('HINSTANCE g_instance{}')] != ms[:ms.index('HINSTANCE g_instance{}')]: raise SystemExit('identity/struct/UI constants changed')
+          if bs[bs.index('DWORD ReadDword'):bs.index('bool InitBridge')] != ms[ms.index('DWORD ReadDword'):ms.index('bool InitBridge')]: raise SystemExit('registry/settings code changed')
+          if bs[bs.index('std::wstring KeyName'):bs.index('bool ConflictWithRogue')] != ms[ms.index('std::wstring KeyName'):ms.index('bool ConflictWithRogue')]: raise SystemExit('hotkey labels/power/UI helper code changed')
           b_ui=bs[bs.index('NormalizedRect NormalizeScreenRect'):bs.index('bool RunSelfTest')]
           m_ui=ms[ms.index('NormalizedRect NormalizeScreenRect'):ms.index('LRESULT CALLBACK TransportObserverProc')]
-          if b_ui != m_ui:
-              raise SystemExit('UI/layout/window code changed')
+          if b_ui != m_ui: raise SystemExit('UI/layout/window code changed')
           pathlib.Path('premium_plus_combo_final/fifo-build/main.cpp').write_bytes(mod)
           print('SourceSHA256='+hashlib.sha256(mod).hexdigest().upper())
           '@ | python -
