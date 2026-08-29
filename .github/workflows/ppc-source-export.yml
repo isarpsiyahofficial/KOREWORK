@@ -1,0 +1,36 @@
+name: PPC Source Export
+on:
+  workflow_dispatch:
+  push:
+    branches: [premium-plus-combo-attack-final]
+    paths:
+      - '.github/workflows/ppc-source-export.yml'
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct patched source
+        run: |
+          mkdir -p /tmp/ppc
+          python - <<'PY'
+          import base64,gzip,pathlib
+          src=pathlib.Path('premium_plus_combo_final/source')
+          parts=sorted((src/'fixed_parts').glob('part*.txt'))
+          raw=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts)))
+          text=raw.decode('utf-8')
+          old='r.left=std::clamp(r.left,vx,vx+vw);r.right=std::clamp(r.right,vx,vx+vw);r.top=std::clamp(r.top,vy,vy+vh);r.bottom=std::clamp(r.bottom,vy,vy+vh);'
+          new='r.left=std::clamp<LONG>(r.left,(LONG)vx,(LONG)(vx+vw));r.right=std::clamp<LONG>(r.right,(LONG)vx,(LONG)(vx+vw));r.top=std::clamp<LONG>(r.top,(LONG)vy,(LONG)(vy+vh));r.bottom=std::clamp<LONG>(r.bottom,(LONG)vy,(LONG)(vy+vh));'
+          text=text.replace(old,new,1)
+          old2='int EstimateFill(const std::vector<RGBc>& col){int n=(int)col.size();if(n<5)return -1;int edge=std::max(1,n/12);RGBc L{},R{};for(int i=0;i<edge;i++){L.r+=col[i].r;L.g+=col[i].g;L.b+=col[i].b;R.r+=col[n-1-i].r;R.g+=col[n-1-i].g;R.b+=col[n-1-i].b;}L.r/=edge;L.g/=edge;L.b/=edge;R.r/=edge;R.g/=edge;R.b/=edge;double lr=Dist(L,R);if(lr<22){double score=0;for(auto&c:col)score+=0.65*Sat(c)+0.35*Lum(c);score/=n;return score>0.34?100:0;}int filled=0;for(int i=0;i<n;i++){double dl=Dist(col[i],L),dr=Dist(col[i],R);if(dl<=dr*1.10)filled=i+1;else if(i>edge)break;}return std::clamp((int)std::lround(100.0*filled/n),0,100);}'
+          new2='int EstimateFill(const std::vector<RGBc>& col){int n=(int)col.size();if(n<5)return -1;int edge=std::max(1,n/12);RGBc L{},R{};for(int i=0;i<edge;i++){L.r+=col[i].r;L.g+=col[i].g;L.b+=col[i].b;R.r+=col[n-1-i].r;R.g+=col[n-1-i].g;R.b+=col[n-1-i].b;}L.r/=edge;L.g/=edge;L.b/=edge;R.r/=edge;R.g/=edge;R.b/=edge;double sL=Sat(L),sR=Sat(R),sumL=L.r+L.g+L.b,sumR=R.r+R.g+R.b;double chroma=999;if(sumL>1&&sumR>1){double lr0=L.r/sumL-R.r/sumR,lg0=L.g/sumL-R.g/sumR,lb0=L.b/sumL-R.b/sumR;chroma=std::sqrt(lr0*lr0+lg0*lg0+lb0*lb0);}if(sL>0.15&&sR>0.15&&std::abs(sL-sR)<0.08&&chroma<0.04)return 100;double lr=Dist(L,R);if(lr<22){double score=0;for(auto&c:col)score+=0.65*Sat(c)+0.35*Lum(c);score/=n;return score>0.34?100:0;}int filled=0;for(int i=0;i<n;i++){double dl=Dist(col[i],L),dr=Dist(col[i],R);if(dl<=dr*1.10)filled=i+1;else if(i>edge)break;}return std::clamp((int)std::lround(100.0*filled/n),0,100);}'
+          text=text.replace(old2,new2,1)
+          pathlib.Path('/tmp/ppc/main.cpp').write_text(text,encoding='utf-8')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ppc-current-main-source
+          path: /tmp/ppc/main.cpp
+          retention-days: 1
