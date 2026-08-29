@@ -4,7 +4,7 @@ on:
   push:
     branches: [premium-plus-combo-timed-input-fix]
     paths:
-      - 'premium_plus_combo_final/source/fifo_transport.patch'
+      - 'premium_plus_combo_final/source/apply_fifo_delta.py'
       - '.github/workflows/premium-plus-combo-fifo-patch.yml'
 permissions:
   contents: read
@@ -16,37 +16,32 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
-      - name: Reconstruct validated baseline
+      - name: Reconstruct validated baseline and apply exact delta
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force premium_plus_combo_final/fifo-patch-build | Out-Null
           @'
-          import base64,gzip,pathlib,hashlib
+          import base64,gzip,pathlib,hashlib,importlib.util
           p=pathlib.Path('premium_plus_combo_final/source/timed_exact')
           parts=sorted(p.glob('part*.txt'))
           if len(parts)!=2: raise SystemExit(f'expected 2 baseline chunks, got {len(parts)}')
           raw=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in parts)))
-          sha=hashlib.sha256(raw).hexdigest()
-          print('BaselineSourceSHA256='+sha.upper())
-          if sha!='d522959ea955ef788af1df00dfff2dd30bd8566fcbb728823ed39de542d19535': raise SystemExit('baseline source SHA mismatch')
-          pathlib.Path('premium_plus_combo_final/fifo-patch-build/main.cpp').write_bytes(raw)
+          if hashlib.sha256(raw).hexdigest()!='d522959ea955ef788af1df00dfff2dd30bd8566fcbb728823ed39de542d19535': raise SystemExit('baseline source SHA mismatch')
+          out=pathlib.Path('premium_plus_combo_final/fifo-patch-build/main.cpp')
+          out.write_bytes(raw)
+          spec=importlib.util.spec_from_file_location('delta','premium_plus_combo_final/source/apply_fifo_delta.py')
+          m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          m.apply_delta(out,out)
+          sha=hashlib.sha256(out.read_bytes()).hexdigest()
+          print('PatchedSourceSHA256='+sha.upper())
+          if sha!='08bb8807b2aa2e3cf416cc8ff417ebbb245bde3128cffe4faf2b7349d82fc8db': raise SystemExit('patched source SHA mismatch')
           '@ | python -
-          if($LASTEXITCODE){throw 'baseline reconstruction failed'}
-      - name: Apply transport-only patch
-        shell: pwsh
-        working-directory: premium_plus_combo_final/fifo-patch-build
-        run: |
-          $ErrorActionPreference='Stop'
-          git apply --whitespace=nowarn ..\source\fifo_transport.patch
-          if($LASTEXITCODE){throw 'git apply failed'}
-          $sha=(Get-FileHash .\main.cpp -Algorithm SHA256).Hash
-          Write-Host "PatchedSourceSHA256=$sha"
-          if($sha -ne '08BB8807B2AA2E3CF416CC8FF417EBBB245BDE3128CFFE4FAF2B7349D82FC8DB'){throw 'patched source SHA mismatch'}
-          $c=Get-Content .\main.cpp -Raw
+          if($LASTEXITCODE){throw 'source reconstruction/delta failed'}
+          $c=Get-Content premium_plus_combo_final/fifo-patch-build/main.cpp -Raw
           foreach($must in @('struct FifoTicketLock','nextTicket.fetch_add','serving.load','KEYEVENTF_SCANCODE','PreciseDelayUs(1000)','PreciseDelayUs(75)','kMagicInput','FifoTicketGuard sequence(g_gameInputGate)','ReferenceTapKeyUnlocked','BridgeSelectiveRouting','--transport-observer-test')){if(-not $c.Contains($must)){throw "transport gate missing: $must"}}
           foreach($bad in @('g_actionMutex','g_bridgeWriteMutex')){if($c.Contains($bad)){throw "legacy input mutex remains: $bad"}}
-      - name: Verify UI registry and settings preservation
+      - name: Verify UI registry settings and hotkeys unchanged
         shell: pwsh
         run: |
           @'
@@ -71,8 +66,8 @@ jobs:
           @'
           #include <windows.h>
           1 VERSIONINFO
-           FILEVERSION 4,5,1,0
-           PRODUCTVERSION 4,5,1,0
+           FILEVERSION 4,5,2,0
+           PRODUCTVERSION 4,5,2,0
            FILEFLAGSMASK 0x3fL
            FILEFLAGS 0
            FILEOS 0x40004L
@@ -83,9 +78,9 @@ jobs:
             BLOCK "041F04E6"
             BEGIN
              VALUE "FileDescription", "Premium Plus Combo - Rogue / Attack\0"
-             VALUE "FileVersion", "4.5.1.0\0"
+             VALUE "FileVersion", "4.5.2.0\0"
              VALUE "ProductName", "Premium Plus Combo\0"
-             VALUE "ProductVersion", "4.5.1.0\0"
+             VALUE "ProductVersion", "4.5.2.0\0"
             END
            END
            BLOCK "VarFileInfo"
@@ -162,7 +157,7 @@ jobs:
           $size=(Get-Item PremiumPlusCombo.exe).Length
           @"
           Product=PremiumPlusCombo
-          Version=4.5.1.0
+          Version=4.5.2.0
           WorkingReferenceSHA256=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856
           BaselineSourceSHA256=D522959EA955EF788AF1DF00DFFF2DD30BD8566FCBB728823ED39DE542D19535
           PatchedSourceSHA256=08BB8807B2AA2E3CF416CC8FF417EBBB245BDE3128CFFE4FAF2B7349D82FC8DB
