@@ -1,0 +1,162 @@
+name: PremiumPlusCombo Exact 062F Elevated Input Build
+on:
+  workflow_dispatch:
+  push:
+    branches: [premium-plus-combo-attack-final]
+    paths: ['premium_plus_combo_final/source/reference062f_parts/**','.github/workflows/premium-plus-combo-fixed-category.yml']
+  pull_request:
+    branches: [main]
+    paths: ['premium_plus_combo_final/source/reference062f_parts/**','.github/workflows/premium-plus-combo-fixed-category.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with: {arch: x64}
+      - name: Reconstruct exact source and resources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'; New-Item -ItemType Directory -Force premium_plus_combo_final/final-build | Out-Null
+          @'
+          import base64,gzip,pathlib,hashlib
+          p=pathlib.Path('premium_plus_combo_final/source/reference062f_parts'); o=pathlib.Path('premium_plus_combo_final/final-build/main.cpp')
+          parts=sorted(p.glob('part*.txt'))
+          if len(parts)!=6: raise SystemExit(f'expected 6 chunks, got {len(parts)}')
+          raw=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in parts))); o.write_bytes(raw)
+          print(hashlib.sha256(raw).hexdigest())
+          '@ | python -
+          if($LASTEXITCODE){throw 'reconstruction failed'}
+          $s=(Get-FileHash premium_plus_combo_final/final-build/main.cpp -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($s -ne '2db77520ff86e6126216a52bbda9bb06a0b9a5ac31776895cd99b29bef9c978a'){throw "source SHA mismatch $s"}
+          $c=Get-Content premium_plus_combo_final/final-build/main.cpp -Raw
+          foreach($n in @('BuildMinorBatch','PublishBridgeInputs','ReferenceSendInputs','ReferenceTapKey','InterlockedExchange64(&g_bridge->writeSequence,seq)','0x005050434F4D424F','g_turbo.load()?240:120','WM_GETMINMAXINFO')){if(-not $c.Contains($n)){throw "missing $n"}}
+          foreach($b in @('Gdiplus','g_rightImage','g_leftImage','LoadImageRes','CreateProcess','VirtualProtect')){if($c.Contains($b)){throw "obsolete/forbidden $b"}}
+          @'
+          #include <windows.h>
+          1 VERSIONINFO
+           FILEVERSION 4,3,1,0
+           PRODUCTVERSION 4,3,1,0
+           FILEFLAGSMASK 0x3fL
+           FILEFLAGS 0
+           FILEOS 0x40004L
+           FILETYPE 0x1L
+          BEGIN
+           BLOCK "StringFileInfo"
+           BEGIN
+            BLOCK "041F04E6"
+            BEGIN
+             VALUE "FileDescription", "Premium Plus Combo - Rogue / Attack\0"
+             VALUE "FileVersion", "4.3.1.0\0"
+             VALUE "ProductName", "Premium Plus Combo\0"
+             VALUE "ProductVersion", "4.3.1.0\0"
+            END
+           END
+           BLOCK "VarFileInfo"
+           BEGIN
+            VALUE "Translation", 0x041F, 1254
+           END
+          END
+          '@ | Set-Content premium_plus_combo_final/final-build/app.rc -Encoding Ascii
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="1.0.0.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"/>
+            <description>Premium Plus Combo - Rogue</description>
+            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+              <security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security>
+            </trustInfo>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3">
+              <windowsSettings>
+                <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+                <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+              </windowsSettings>
+            </application>
+            <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+              <application>
+                <supportedOS Id="{4f476546-937f-4a47-9aa8-1d328b35c7ad}"/>
+                <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+              </application>
+            </compatibility>
+          </assembly>
+          '@ | Set-Content premium_plus_combo_final/final-build/final.manifest -Encoding UTF8
+      - name: Build test and final x64 EXEs
+        shell: pwsh
+        working-directory: premium_plus_combo_final/final-build
+        run: |
+          rc /nologo app.rc; if($LASTEXITCODE){throw 'rc failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo-Test.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+          if($LASTEXITCODE){throw 'test cl failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'final cl failed'}
+          mt.exe -manifest final.manifest "-outputresource:PremiumPlusCombo.exe;#1"
+          if($LASTEXITCODE){throw 'manifest embed failed'}
+      - name: Behavior tests from identical source
+        shell: pwsh
+        working-directory: premium_plus_combo_final/final-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--self-test' -Wait -PassThru; if($p.ExitCode){throw "self-test exit $($p.ExitCode)"}
+          $r=Get-Content self-test-report.txt -Raw
+          if($r -notmatch 'TOTAL=138' -or $r -notmatch 'PASSED=138' -or $r -match '=FAIL'){Get-Content self-test-report.txt;throw 'self-test failed'}
+          foreach($n in @('BridgeAllKeyboardRouting=PASS','MinorReferenceSequenceModel=PASS','AttackPerSkillBarSlotSequence=PASS','SkillBarF1ToF12Mapping=PASS','NonCapsHotkeyMapping=PASS','CureSequenceF2_6_F1=PASS')){if($r -notmatch [regex]::Escape($n)){throw "missing $n"}}
+      - name: Verify exact final manifest and PE
+        shell: pwsh
+        working-directory: premium_plus_combo_final/final-build
+        run: |
+          mt.exe "-inputresource:PremiumPlusCombo.exe;#1" -out:embedded.manifest
+          if($LASTEXITCODE){throw 'manifest extraction failed'}
+          $m=Get-Content embedded.manifest -Raw
+          foreach($must in @('requireAdministrator','PerMonitorV2','true/pm','processorArchitecture="amd64"')){if($m -notmatch [regex]::Escape($must)){throw "manifest missing $must"}}
+          if($m -match 'level="asInvoker"'){throw 'asInvoker leaked into final manifest'}
+          dumpbin /headers PremiumPlusCombo.exe | Set-Content headers.txt; dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
+          $h=Get-Content headers.txt -Raw;$i=Get-Content imports.txt -Raw
+          if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
+          foreach($b in @('gdiplus.dll','WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll')){if($i -match [regex]::Escape($b)){throw "unexpected import $b"}}
+          if($h -match 'E0000060'){throw 'RWX section'}
+      - name: Microsoft Defender final EXE
+        shell: pwsh
+        working-directory: premium_plus_combo_final/final-build
+        run: |
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe";if(-not(Test-Path $mp)){$mp=Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform" -Directory|Sort-Object Name -Descending|%{Join-Path $_.FullName 'MpCmdRun.exe'}|?{Test-Path $_}|Select-Object -First 1}
+          if(-not $mp){throw 'Defender unavailable'};& $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo.exe) -DisableRemediation;if($LASTEXITCODE){throw "Defender $LASTEXITCODE"};'DefenderScan=PASS'|Set-Content defender-scan.txt
+      - name: Report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/final-build
+        run: |
+          $sha=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash;$size=(Get-Item PremiumPlusCombo.exe).Length
+          @"
+          Product=PremiumPlusCombo
+          Version=4.3.1.0
+          ReferenceWorkingMinorSHA256=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856
+          SourceSHA256=2DB77520FF86E6126216A52BBDA9BB06A0B9A5AC31776895CD99B29BEF9C978A
+          Manifest=requireAdministrator
+          DpiAwareness=PerMonitorV2
+          MinorInput=EXACT_062F_BATCH_6_EVENTS_QPC_120_240
+          BridgeCommitOrder=EVENT_DATA_THEN_EVENT_SEQUENCE_THEN_WRITE_SEQUENCE
+          InputMarker=PPCOMBO_EXACT_062F
+          CureInput=REFERENCE_PAIR_BATCH
+          AttackInput=REFERENCE_PAIR_BATCH
+          UI=RESIZABLE_MIN_800x620_COMPACT_NO_IMAGES
+          Images=NONE
+          SelfTest=138/138 PASS
+          DefenderScan=PASS
+          SHA256=$sha
+          Size=$size
+          RealGameVerification=USER_SIDE_REQUIRED
+          "@|Set-Content BUILD-INFO.txt;Get-Content BUILD-INFO.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-Windows-x64-EXACT-062F-ELEVATED
+          path: |
+            premium_plus_combo_final/final-build/PremiumPlusCombo.exe
+            premium_plus_combo_final/final-build/main.cpp
+            premium_plus_combo_final/final-build/final.manifest
+            premium_plus_combo_final/final-build/embedded.manifest
+            premium_plus_combo_final/final-build/BUILD-INFO.txt
+            premium_plus_combo_final/final-build/self-test-report.txt
+            premium_plus_combo_final/final-build/defender-scan.txt
+            premium_plus_combo_final/final-build/imports.txt
+            premium_plus_combo_final/final-build/headers.txt
+          retention-days: 14
