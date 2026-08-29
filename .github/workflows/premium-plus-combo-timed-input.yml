@@ -87,7 +87,7 @@ jobs:
           '''
           s=s[:start]+new+s[end:]
           s=s.replace("test(\"BridgeAllKeyboardRouting\",IsBridgeInputKey('1')&&IsBridgeInputKey('0')&&IsBridgeInputKey('R')&&IsBridgeInputKey('Z')&&IsBridgeInputKey(VK_F1)&&IsBridgeInputKey(VK_F12),f);", "test(\"BridgeAllKeyboardRouting\",IsBridgeInputKey('1')&&IsBridgeInputKey('0')&&IsBridgeInputKey('R')&&!IsBridgeInputKey('Z')&&!IsBridgeInputKey(VK_F1)&&!IsBridgeInputKey(VK_F12),f);")
-          o.write_text(s)
+          o.write_bytes(s.encode('utf-8'))
           sha=hashlib.sha256(o.read_bytes()).hexdigest();print('patched source',sha)
           if sha!='d522959ea955ef788af1df00dfff2dd30bd8566fcbb728823ed39de542d19535': raise SystemExit('patched source SHA mismatch')
           '@ | python -
