@@ -1,12 +1,12 @@
-name: PremiumPlusCombo Reference Input Responsive Build
+name: PremiumPlusCombo Exact 062F Input Build
 on:
   workflow_dispatch:
   push:
     branches: [premium-plus-combo-attack-final]
-    paths: ['premium_plus_combo_final/source/fixed_parts/**','.github/workflows/premium-plus-combo-fixed-category.yml']
+    paths: ['premium_plus_combo_final/source/reference062f_parts/**','.github/workflows/premium-plus-combo-fixed-category.yml']
   pull_request:
     branches: [main]
-    paths: ['premium_plus_combo_final/source/fixed_parts/**','.github/workflows/premium-plus-combo-fixed-category.yml']
+    paths: ['premium_plus_combo_final/source/reference062f_parts/**','.github/workflows/premium-plus-combo-fixed-category.yml']
 permissions:
   contents: read
 jobs:
@@ -16,13 +16,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
         with: {arch: x64}
-      - name: Reconstruct and validate exact source
+      - name: Reconstruct exact source
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'; New-Item -ItemType Directory -Force premium_plus_combo_final/final-build | Out-Null
           @'
           import base64,gzip,pathlib,hashlib
-          p=pathlib.Path('premium_plus_combo_final/source/fixed_parts'); o=pathlib.Path('premium_plus_combo_final/final-build/main.cpp')
+          p=pathlib.Path('premium_plus_combo_final/source/reference062f_parts'); o=pathlib.Path('premium_plus_combo_final/final-build/main.cpp')
           parts=sorted(p.glob('part*.txt'))
           if len(parts)!=6: raise SystemExit(f'expected 6 chunks, got {len(parts)}')
           raw=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in parts))); o.write_bytes(raw)
@@ -30,15 +30,15 @@ jobs:
           '@ | python -
           if($LASTEXITCODE){throw 'reconstruction failed'}
           $s=(Get-FileHash premium_plus_combo_final/final-build/main.cpp -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($s -ne '39000951c06cf167e1b0c9b1d790ceb35eaa0a326bdc5f13a0d752a6898db8dc'){throw "source SHA mismatch $s"}
+          if($s -ne '2db77520ff86e6126216a52bbda9bb06a0b9a5ac31776895cd99b29bef9c978a'){throw "source SHA mismatch $s"}
           $c=Get-Content premium_plus_combo_final/final-build/main.cpp -Raw
-          foreach($n in @('MAPVK_VK_TO_VSC_EX','TapRouted(vk,index+1)','TapRouted(BarToVk(r.cureBar),20)',"TapRouted('Z',2)",'WM_GETMINMAXINFO','BridgeAllKeyboardRouting','MinorReferenceSequenceModel')){if(-not $c.Contains($n)){throw "missing $n"}}
-          foreach($b in @('Gdiplus','g_rightImage','g_leftImage','LoadImageRes','TapNative','CreateProcess','VirtualProtect')){if($c.Contains($b)){throw "obsolete/forbidden $b"}}
+          foreach($n in @('BuildMinorBatch','PublishBridgeInputs','ReferenceSendInputs','ReferenceTapKey','InterlockedExchange64(&g_bridge->writeSequence,seq)','0x005050434F4D424F','g_turbo.load()?240:120','WM_GETMINMAXINFO')){if(-not $c.Contains($n)){throw "missing $n"}}
+          foreach($b in @('Gdiplus','g_rightImage','g_leftImage','LoadImageRes','CreateProcess','VirtualProtect')){if($c.Contains($b)){throw "obsolete/forbidden $b"}}
           @'
           #include <windows.h>
           1 VERSIONINFO
-           FILEVERSION 4,1,0,0
-           PRODUCTVERSION 4,1,0,0
+           FILEVERSION 4,2,0,0
+           PRODUCTVERSION 4,2,0,0
            FILEFLAGSMASK 0x3fL
            FILEFLAGS 0
            FILEOS 0x40004L
@@ -49,9 +49,9 @@ jobs:
             BLOCK "041F04E6"
             BEGIN
              VALUE "FileDescription", "Premium Plus Combo - Rogue / Attack\0"
-             VALUE "FileVersion", "4.1.0.0\0"
+             VALUE "FileVersion", "4.2.0.0\0"
              VALUE "ProductName", "Premium Plus Combo\0"
-             VALUE "ProductVersion", "4.1.0.0\0"
+             VALUE "ProductVersion", "4.2.0.0\0"
             END
            END
            BLOCK "VarFileInfo"
@@ -97,13 +97,14 @@ jobs:
           $sha=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash;$size=(Get-Item PremiumPlusCombo.exe).Length
           @"
           Product=PremiumPlusCombo
-          Version=4.1.0.0
+          Version=4.2.0.0
           ReferenceWorkingMinorSHA256=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856
-          SourceSHA256=39000951C06CF167E1B0C9B1D790CEB35EAA0A326BDC5F13A0D752A6898DB8DC
-          InputRoute=REFERENCE_062F_GAMEBRIDGE_FIRST_ALL_KEYBOARD_SCAN_CODE_FALLBACK
-          Minor=REFERENCE_062F_SEQUENTIAL_TIMING
-          Cure=SAME_INPUT_ROUTE_AS_MINOR
-          Attack=SAME_INPUT_ROUTE_AS_MINOR
+          SourceSHA256=2DB77520FF86E6126216A52BBDA9BB06A0B9A5AC31776895CD99B29BEF9C978A
+          MinorInput=EXACT_062F_BATCH_6_EVENTS_QPC_120_240
+          BridgeCommitOrder=EVENT_DATA_THEN_EVENT_SEQUENCE_THEN_WRITE_SEQUENCE
+          InputMarker=PPCOMBO_EXACT_062F
+          CureInput=REFERENCE_PAIR_BATCH
+          AttackInput=REFERENCE_PAIR_BATCH
           UI=RESIZABLE_MIN_800x620_COMPACT_NO_IMAGES
           Images=NONE
           SelfTest=138/138 PASS
@@ -114,7 +115,7 @@ jobs:
           "@|Set-Content BUILD-INFO.txt;Get-Content BUILD-INFO.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: PremiumPlusCombo-Windows-x64-REFERENCE-INPUT-RESPONSIVE
+          name: PremiumPlusCombo-Windows-x64-EXACT-062F-INPUT
           path: |
             premium_plus_combo_final/final-build/PremiumPlusCombo.exe
             premium_plus_combo_final/final-build/main.cpp
