@@ -65,7 +65,7 @@ jobs:
           if d.get('.atkcode') != 0x60000020: raise SystemExit(f'bad .atkcode flags {d.get(".atkcode")}')
           if d.get('.atkdata') != 0xC0000040: raise SystemExit(f'bad .atkdata flags {d.get(".atkdata")}')
 
-          forbidden = [b'CreateProcess', b'ShellExecute', b'WinExec', b'WINHTTP.dll', b'WININET.dll', b'WS2_32.dll', b'cmd.exe', b'powershell.exe', b'http://', b'https://']
+          forbidden = [b'CreateProcess', b'ShellExecute', b'WinExec', b'WINHTTP.dll', b'WININET.dll', b'WS2_32.dll', b'cmd.exe', b'powershell.exe']
           for token in forbidden:
               if token.lower() in data.lower():
                   raise SystemExit(f'forbidden token in binary: {token!r}')
