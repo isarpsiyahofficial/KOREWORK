@@ -1,0 +1,196 @@
+name: PremiumPlusCombo 062F Timed Input Fix
+on:
+  workflow_dispatch:
+  push:
+    branches: [premium-plus-combo-timed-input-fix]
+    paths: ['.github/workflows/premium-plus-combo-timed-input.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with: {arch: x64}
+      - name: Reconstruct 062F-derived source and restore timed fallback
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force premium_plus_combo_final/timed-build | Out-Null
+          @'
+          import base64,gzip,pathlib,hashlib
+          p=pathlib.Path('premium_plus_combo_final/source/reference062f_parts')
+          o=pathlib.Path('premium_plus_combo_final/timed-build/main.cpp')
+          parts=sorted(p.glob('part*.txt'))
+          if len(parts)!=6: raise SystemExit(f'expected 6 chunks, got {len(parts)}')
+          raw=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in parts)))
+          if hashlib.sha256(raw).hexdigest()!='2db77520ff86e6126216a52bbda9bb06a0b9a5ac31776895cd99b29bef9c978a': raise SystemExit('base source SHA mismatch')
+          s=raw.decode()
+          s=s.replace('bool IsBridgeInputKey(int vk){ return vk>0&&vk<256; }', "bool IsBridgeInputKey(int vk){ return (vk>='1'&&vk<='9')||vk=='0'||vk=='R'||vk=='r'; }")
+          start=s.index('UINT ReferenceSendInputs(const INPUT* inputs,UINT count){')
+          end=s.index('bool ReferenceTapKey(int vk)',start)
+          new=r'''void PreciseDelayUs(int microseconds){
+            if(microseconds<=0)return;
+            LARGE_INTEGER freq{},begin{},now{};
+            QueryPerformanceFrequency(&freq);QueryPerformanceCounter(&begin);
+            LONGLONG ticks=std::max<LONGLONG>(1,(freq.QuadPart*(LONGLONG)microseconds)/1000000LL);
+            LONGLONG target=begin.QuadPart+ticks;
+            for(;;){QueryPerformanceCounter(&now);if(now.QuadPart>=target)break;LONGLONG left=target-now.QuadPart;if(left*1000>freq.QuadPart)SwitchToThread();else YieldProcessor();}
+          }
+          INPUT NativeNormalizedInput(const INPUT& source){
+            INPUT in=source;
+            if(in.type==INPUT_KEYBOARD && !(in.ki.dwFlags&(KEYEVENTF_SCANCODE|KEYEVENTF_UNICODE)) && in.ki.wVk){
+              UINT scan=MapVirtualKeyW(in.ki.wVk,MAPVK_VK_TO_VSC_EX);
+              if(scan){in.ki.wVk=0;in.ki.wScan=(WORD)(scan&0xFFu);in.ki.dwFlags|=KEYEVENTF_SCANCODE;if(scan&0xFF00u)in.ki.dwFlags|=KEYEVENTF_EXTENDEDKEY;}
+            }
+            return in;
+          }
+          bool SendOneReferenceInput(const INPUT& source){
+            if(PublishBridgeInputs(&source,1))return true;
+            INPUT native=NativeNormalizedInput(source);
+            return SendInput(1,&native,sizeof(INPUT))==1;
+          }
+          bool MatchingDownUpPair(const INPUT& down,const INPUT& up){
+            return down.type==INPUT_KEYBOARD&&up.type==INPUT_KEYBOARD&&
+                   !(down.ki.dwFlags&KEYEVENTF_KEYUP)&&(up.ki.dwFlags&KEYEVENTF_KEYUP)&&
+                   down.ki.wVk==up.ki.wVk&&down.ki.wScan==up.ki.wScan;
+          }
+          UINT ReferenceSendInputs(const INPUT* inputs,UINT count){
+            if(!inputs||!count)return 0;
+            bool allKeyboard=true;for(UINT i=0;i<count;i++)if(inputs[i].type!=INPUT_KEYBOARD){allKeyboard=false;break;}
+            if(!allKeyboard){
+              if(PublishBridgeInputs(inputs,count))return count;
+              std::vector<INPUT> native;native.reserve(count);for(UINT i=0;i<count;i++)native.push_back(NativeNormalizedInput(inputs[i]));
+              return SendInput(count,native.data(),sizeof(INPUT));
+            }
+            if(BridgeReceiverLive()&&PublishBridgeInputs(inputs,count))return count;
+            UINT done=0;
+            std::lock_guard<std::mutex> nativeLock(g_bridgeWriteMutex);
+            while(done<count){
+              bool pair=(done+1<count)&&MatchingDownUpPair(inputs[done],inputs[done+1]);
+              INPUT first=NativeNormalizedInput(inputs[done]);
+              if(SendInput(1,&first,sizeof(INPUT))!=1)break;
+              if(pair){
+                PreciseDelayUs(1000);
+                INPUT second=NativeNormalizedInput(inputs[done+1]);
+                if(SendInput(1,&second,sizeof(INPUT))!=1){Sleep(1);if(SendInput(1,&second,sizeof(INPUT))!=1)break;}
+                done+=2;PreciseDelayUs(50);
+              }else{
+                bool up=(inputs[done].ki.dwFlags&KEYEVENTF_KEYUP)!=0;
+                ++done;PreciseDelayUs(up?50:1000);
+              }
+            }
+            return done;
+          }
+
+          '''
+          s=s[:start]+new+s[end:]
+          s=s.replace("test(\"BridgeAllKeyboardRouting\",IsBridgeInputKey('1')&&IsBridgeInputKey('0')&&IsBridgeInputKey('R')&&IsBridgeInputKey('Z')&&IsBridgeInputKey(VK_F1)&&IsBridgeInputKey(VK_F12),f);", "test(\"BridgeAllKeyboardRouting\",IsBridgeInputKey('1')&&IsBridgeInputKey('0')&&IsBridgeInputKey('R')&&!IsBridgeInputKey('Z')&&!IsBridgeInputKey(VK_F1)&&!IsBridgeInputKey(VK_F12),f);")
+          o.write_text(s)
+          sha=hashlib.sha256(o.read_bytes()).hexdigest();print('patched source',sha)
+          if sha!='d522959ea955ef788af1df00dfff2dd30bd8566fcbb728823ed39de542d19535': raise SystemExit('patched source SHA mismatch')
+          '@ | python -
+          if($LASTEXITCODE){throw 'source reconstruction/patch failed'}
+          @'
+          #include <windows.h>
+          1 VERSIONINFO
+           FILEVERSION 4,4,0,0
+           PRODUCTVERSION 4,4,0,0
+           FILEFLAGSMASK 0x3fL
+           FILEFLAGS 0
+           FILEOS 0x40004L
+           FILETYPE 0x1L
+          BEGIN
+           BLOCK "StringFileInfo"
+           BEGIN
+            BLOCK "041F04E6"
+            BEGIN
+             VALUE "FileDescription", "Premium Plus Combo - Rogue / Attack\0"
+             VALUE "FileVersion", "4.4.0.0\0"
+             VALUE "ProductName", "Premium Plus Combo\0"
+             VALUE "ProductVersion", "4.4.0.0\0"
+            END
+           END
+           BLOCK "VarFileInfo"
+           BEGIN
+            VALUE "Translation", 0x041F, 1254
+           END
+          END
+          '@ | Set-Content premium_plus_combo_final/timed-build/app.rc -Encoding Ascii
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="1.0.0.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"/>
+            <description>Premium Plus Combo - Rogue</description>
+            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security></trustInfo>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content premium_plus_combo_final/timed-build/final.manifest -Encoding UTF8
+      - name: Build x64 test and final
+        shell: pwsh
+        working-directory: premium_plus_combo_final/timed-build
+        run: |
+          rc /nologo app.rc; if($LASTEXITCODE){throw 'rc failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo-Test.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+          if($LASTEXITCODE){throw 'test build failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'final build failed'}
+          mt.exe -manifest final.manifest "-outputresource:PremiumPlusCombo.exe;#1"; if($LASTEXITCODE){throw 'manifest embed failed'}
+      - name: Behavioral and source gates
+        shell: pwsh
+        working-directory: premium_plus_combo_final/timed-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--self-test' -Wait -PassThru; if($p.ExitCode){throw "self-test exit $($p.ExitCode)"}
+          $r=Get-Content self-test-report.txt -Raw
+          if($r -notmatch 'TOTAL=138' -or $r -notmatch 'PASSED=138' -or $r -match '=FAIL'){Get-Content self-test-report.txt;throw 'self-test failed'}
+          foreach($n in @('BridgeAllKeyboardRouting=PASS','MinorReferenceSequenceModel=PASS','AttackPerSkillBarSlotSequence=PASS','CureSequenceF2_6_F1=PASS')){if($r -notmatch [regex]::Escape($n)){throw "missing $n"}}
+          $c=Get-Content main.cpp -Raw
+          foreach($n in @('PreciseDelayUs(1000)','PreciseDelayUs(50)','MatchingDownUpPair','!IsBridgeInputKey(VK_F1)','!IsBridgeInputKey(VK_F12)')){if(-not $c.Contains($n)){throw "timed route missing $n"}}
+      - name: PE and Defender
+        shell: pwsh
+        working-directory: premium_plus_combo_final/timed-build
+        run: |
+          mt.exe "-inputresource:PremiumPlusCombo.exe;#1" -out:embedded.manifest; if($LASTEXITCODE){throw 'manifest extract failed'}
+          if((Get-Content embedded.manifest -Raw) -notmatch 'requireAdministrator'){throw 'manifest mismatch'}
+          dumpbin /headers PremiumPlusCombo.exe | Set-Content headers.txt; dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
+          $h=Get-Content headers.txt -Raw;$i=Get-Content imports.txt -Raw
+          if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
+          if($h -match 'E0000060'){throw 'RWX section'}
+          foreach($b in @('WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll')){if($i -match [regex]::Escape($b)){throw "unexpected import $b"}}
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe";if(-not(Test-Path $mp)){$mp=Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform" -Directory|Sort-Object Name -Descending|%{Join-Path $_.FullName 'MpCmdRun.exe'}|?{Test-Path $_}|Select-Object -First 1}
+          if(-not $mp){throw 'Defender unavailable'};& $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo.exe) -DisableRemediation;if($LASTEXITCODE){throw "Defender $LASTEXITCODE"};'DefenderScan=PASS'|Set-Content defender-scan.txt
+      - name: Report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/timed-build
+        run: |
+          $sha=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash;$size=(Get-Item PremiumPlusCombo.exe).Length
+          @"
+          Product=PremiumPlusCombo
+          Version=4.4.0.0
+          ReferenceWorkingMinorSHA256=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856
+          PatchedSourceSHA256=D522959EA955EF788AF1DF00DFFF2DD30BD8566FCBB728823ED39DE542D19535
+          RootCauseFix=062F_TIMED_SINGLE_EVENT_FALLBACK
+          NativeKeyDownHoldUs=1000
+          NativePostKeyUpGapUs=50
+          BridgeRoute=ONLY_1-0_AND_R
+          ZAndF1F12=NATIVE_TIMED_FALLBACK
+          MinorBatch=6_EVENTS_QPC_120_240
+          SelfTest=138/138 PASS
+          DefenderScan=PASS
+          SHA256=$sha
+          Size=$size
+          RealGameVerification=USER_SIDE_REQUIRED
+          "@ | Set-Content BUILD-INFO.txt
+          Get-Content BUILD-INFO.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-Windows-x64-062F-TIMED-INPUT
+          path: |
+            premium_plus_combo_final/timed-build/PremiumPlusCombo.exe
+            premium_plus_combo_final/timed-build/main.cpp
+            premium_plus_combo_final/timed-build/BUILD-INFO.txt
+            premium_plus_combo_final/timed-build/self-test-report.txt
+            premium_plus_combo_final/timed-build/defender-scan.txt
+            premium_plus_combo_final/timed-build/embedded.manifest
+          retention-days: 14
