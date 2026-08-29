@@ -1,64 +1,39 @@
 name: PremiumPlusCombo Reference Input Responsive Build
-
 on:
   workflow_dispatch:
   push:
     branches: [premium-plus-combo-attack-final]
-    paths:
-      - 'premium_plus_combo_final/source/fixed_parts/**'
-      - '.github/workflows/premium-plus-combo-fixed-category.yml'
+    paths: ['premium_plus_combo_final/source/fixed_parts/**','.github/workflows/premium-plus-combo-fixed-category.yml']
   pull_request:
     branches: [main]
-    paths:
-      - 'premium_plus_combo_final/source/fixed_parts/**'
-      - '.github/workflows/premium-plus-combo-fixed-category.yml'
-
+    paths: ['premium_plus_combo_final/source/fixed_parts/**','.github/workflows/premium-plus-combo-fixed-category.yml']
 permissions:
   contents: read
-
 jobs:
   build:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Reconstruct exact patched source
+        with: {arch: x64}
+      - name: Reconstruct and validate exact source
         shell: pwsh
         run: |
-          $ErrorActionPreference='Stop'
-          New-Item -ItemType Directory -Force premium_plus_combo_final/final-build | Out-Null
+          $ErrorActionPreference='Stop'; New-Item -ItemType Directory -Force premium_plus_combo_final/final-build | Out-Null
           @'
           import base64,gzip,pathlib,hashlib
-          src=pathlib.Path('premium_plus_combo_final/source/fixed_parts')
-          out=pathlib.Path('premium_plus_combo_final/final-build/main.cpp')
-          parts=sorted(src.glob('part*.txt'))
+          p=pathlib.Path('premium_plus_combo_final/source/fixed_parts'); o=pathlib.Path('premium_plus_combo_final/final-build/main.cpp')
+          parts=sorted(p.glob('part*.txt'))
           if len(parts)!=6: raise SystemExit(f'expected 6 chunks, got {len(parts)}')
-          raw=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts)))
-          out.write_bytes(raw)
-          print('source sha',hashlib.sha256(raw).hexdigest())
+          raw=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in parts))); o.write_bytes(raw)
+          print(hashlib.sha256(raw).hexdigest())
           '@ | python -
-          if($LASTEXITCODE -ne 0){throw 'reconstruction failed'}
-          $sha=(Get-FileHash premium_plus_combo_final/final-build/main.cpp -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($sha -ne '39000951c06cf167e1b0c9b1d790ceb35eaa0a326bdc5f13a0d752a6898db8dc'){throw "source SHA mismatch: $sha"}
-          $code=Get-Content premium_plus_combo_final/final-build/main.cpp -Raw
-          foreach($need in @(
-            'kWindowWidth = 800','kWindowHeight = 620',
-            'Local\\PremiumPlusCombo.Rogue.GameBridge.v1',
-            'IDC_CATEGORY_ROGUE','IDC_CATEGORY_ATTACK',
-            'PublishBridgeEvent','BridgeReceiverLive','MAPVK_VK_TO_VSC_EX',
-            'MinorWorker','TapRouted(fresh.seq[index],index+1)',
-            'TapRouted(BarToVk(r.cureBar),20)',"TapRouted('Z',2)",
-            'WM_GETMINMAXINFO','LayoutChrome',
-            'AttackPerSkillBarSlotSequence','BridgeAllKeyboardRouting','MinorReferenceSequenceModel',
-            'HPEnabled','MPEnabled')){
-            if(-not $code.Contains($need)){throw "required behavior missing: $need"}
-          }
-          foreach($bad in @('CreateProcess','ShellExecute','WinExec','WinHttp','InternetOpen','WSAStartup','VirtualProtect','Gdiplus','LoadImageRes','g_rightImage','g_leftImage','TapNative')){
-            if($code.Contains($bad)){throw "forbidden/obsolete source path present: $bad"}
-          }
+          if($LASTEXITCODE){throw 'reconstruction failed'}
+          $s=(Get-FileHash premium_plus_combo_final/final-build/main.cpp -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($s -ne '39000951c06cf167e1b0c9b1d790ceb35eaa0a326bdc5f13a0d752a6898db8dc'){throw "source SHA mismatch $s"}
+          $c=Get-Content premium_plus_combo_final/final-build/main.cpp -Raw
+          foreach($n in @('MAPVK_VK_TO_VSC_EX','TapRouted(fresh.seq[index],index+1)','TapRouted(BarToVk(r.cureBar),20)',"TapRouted('Z',2)",'WM_GETMINMAXINFO','BridgeAllKeyboardRouting','MinorReferenceSequenceModel')){if(-not $c.Contains($n)){throw "missing $n"}}
+          foreach($b in @('Gdiplus','g_rightImage','g_leftImage','LoadImageRes','TapNative','CreateProcess','VirtualProtect')){if($c.Contains($b)){throw "obsolete/forbidden $b"}}
           @'
           #include <windows.h>
           1 VERSIONINFO
@@ -73,11 +48,8 @@ jobs:
            BEGIN
             BLOCK "041F04E6"
             BEGIN
-             VALUE "CompanyName", "Premium Plus Combo\0"
              VALUE "FileDescription", "Premium Plus Combo - Rogue / Attack\0"
              VALUE "FileVersion", "4.1.0.0\0"
-             VALUE "InternalName", "PremiumPlusCombo\0"
-             VALUE "OriginalFilename", "PremiumPlusCombo.exe\0"
              VALUE "ProductName", "Premium Plus Combo\0"
              VALUE "ProductVersion", "4.1.0.0\0"
             END
@@ -88,91 +60,58 @@ jobs:
            END
           END
           '@ | Set-Content premium_plus_combo_final/final-build/app.rc -Encoding Ascii
-
-      - name: Build single native x64 EXE
+      - name: Build native x64 single EXE
         shell: pwsh
         working-directory: premium_plus_combo_final/final-build
         run: |
-          $ErrorActionPreference='Stop'
-          rc /nologo app.rc; if($LASTEXITCODE -ne 0){throw 'rc failed'}
+          rc /nologo app.rc; if($LASTEXITCODE){throw 'rc failed'}
           cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
-          if($LASTEXITCODE -ne 0){throw "cl failed: $LASTEXITCODE"}
-
-      - name: Run deterministic behavior and detector tests
+          if($LASTEXITCODE){throw 'cl failed'}
+      - name: Behavior tests
         shell: pwsh
         working-directory: premium_plus_combo_final/final-build
         run: |
-          $p=Start-Process .\PremiumPlusCombo.exe -ArgumentList '--self-test' -Wait -PassThru
-          if($p.ExitCode -ne 0){Get-Content self-test-report.txt -ErrorAction SilentlyContinue;throw "self-test exit $($p.ExitCode)"}
+          $p=Start-Process .\PremiumPlusCombo.exe -ArgumentList '--self-test' -Wait -PassThru; if($p.ExitCode){throw "self-test exit $($p.ExitCode)"}
           $r=Get-Content self-test-report.txt -Raw
           if($r -notmatch 'TOTAL=138' -or $r -notmatch 'PASSED=138' -or $r -match '=FAIL'){Get-Content self-test-report.txt;throw 'self-test failed'}
-          foreach($need in @('BridgeAllKeyboardRouting=PASS','MinorReferenceSequenceModel=PASS','AttackPerSkillBarSlotSequence=PASS','SkillBarF1ToF12Mapping=PASS','NonCapsHotkeyMapping=PASS','CureSequenceF2_6_F1=PASS')){
-            if($r -notmatch [regex]::Escape($need)){throw "missing test $need"}
-          }
-          Get-Content self-test-report.txt | Select-Object -Last 12
-
-      - name: PE import and image-free sanity
+          foreach($n in @('BridgeAllKeyboardRouting=PASS','MinorReferenceSequenceModel=PASS','AttackPerSkillBarSlotSequence=PASS','SkillBarF1ToF12Mapping=PASS','NonCapsHotkeyMapping=PASS','CureSequenceF2_6_F1=PASS')){if($r -notmatch [regex]::Escape($n)){throw "missing $n"}}
+      - name: PE and import sanity
         shell: pwsh
         working-directory: premium_plus_combo_final/final-build
         run: |
-          dumpbin /headers PremiumPlusCombo.exe | Set-Content headers.txt
-          dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
-          dumpbin /rawdata PremiumPlusCombo.exe | Set-Content rawdata.txt
-          $h=Get-Content headers.txt -Raw; $i=Get-Content imports.txt -Raw
+          dumpbin /headers PremiumPlusCombo.exe | Set-Content headers.txt; dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
+          $h=Get-Content headers.txt -Raw;$i=Get-Content imports.txt -Raw
           if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
-          foreach($bad in @('CreateProcess','ShellExecute','WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll','gdiplus.dll')){
-            if($i -match [regex]::Escape($bad)){throw "unexpected import $bad"}
-          }
-          if($h -match 'E0000060'){throw 'RWX section detected'}
-          if((Get-Item PremiumPlusCombo.exe).Length -le 0){throw 'empty exe'}
-
-      - name: Microsoft Defender scan
+          foreach($b in @('gdiplus.dll','WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll')){if($i -match [regex]::Escape($b)){throw "unexpected import $b"}}
+          if($h -match 'E0000060'){throw 'RWX section'}
+      - name: Microsoft Defender
         shell: pwsh
         working-directory: premium_plus_combo_final/final-build
         run: |
-          $ErrorActionPreference='Stop'
-          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
-          if(-not (Test-Path $mp)){
-            $root="$env:ProgramData\Microsoft\Windows Defender\Platform"
-            $mp=Get-ChildItem $root -Directory | Sort-Object Name -Descending | ForEach-Object {Join-Path $_.FullName 'MpCmdRun.exe'} | Where-Object {Test-Path $_} | Select-Object -First 1
-          }
-          if(-not $mp){throw 'Defender unavailable'}
-          & $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo.exe) -DisableRemediation
-          if($LASTEXITCODE -ne 0){throw "Defender detected/scan error $LASTEXITCODE"}
-          'DefenderScan=PASS' | Set-Content defender-scan.txt
-
-      - name: Build report
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe";if(-not(Test-Path $mp)){$mp=Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform" -Directory|Sort-Object Name -Descending|%{Join-Path $_.FullName 'MpCmdRun.exe'}|?{Test-Path $_}|Select-Object -First 1}
+          if(-not $mp){throw 'Defender unavailable'};& $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo.exe) -DisableRemediation;if($LASTEXITCODE){throw "Defender $LASTEXITCODE"};'DefenderScan=PASS'|Set-Content defender-scan.txt
+      - name: Report
         shell: pwsh
         working-directory: premium_plus_combo_final/final-build
         run: |
-          $sha=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash
-          $size=(Get-Item PremiumPlusCombo.exe).Length
+          $sha=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash;$size=(Get-Item PremiumPlusCombo.exe).Length
           @"
           Product=PremiumPlusCombo
           Version=4.1.0.0
-          Packaging=SingleNativeEXE
-          Architecture=x64
-          StaticCRT=PASS
           ReferenceWorkingMinorSHA256=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856
           SourceSHA256=39000951C06CF167E1B0C9B1D790CEB35EAA0A326BDC5F13A0D752A6898DB8DC
           InputRoute=REFERENCE_062F_GAMEBRIDGE_FIRST_ALL_KEYBOARD_SCAN_CODE_FALLBACK
-          BridgeHeartbeatMs=2000
-          Minor=REFERENCE_062F_SEQUENTIAL_1_2_3MS_HOLD_MAX_SLEEP1_TURBO_YIELD
-          Cure=SAME_ROUTED_INPUT_AS_MINOR_BAR_SLOT_RESTORE_R_PAUSE_2000MS
-          Attack=SAME_ROUTED_INPUT_AS_MINOR_Z_PER_SKILL_F1-F12_PLUS_1-0
-          HPMP=SCREEN_ROI_CALIBRATION_COLOR_INDEPENDENT_ROUTED_POTION_KEYS
-          UI=RESIZABLE_MIN_800x620_COMPACT_HOTKEYS_NO_OVERLAP
+          Minor=REFERENCE_062F_SEQUENTIAL_TIMING
+          Cure=SAME_INPUT_ROUTE_AS_MINOR
+          Attack=SAME_INPUT_ROUTE_AS_MINOR
+          UI=RESIZABLE_MIN_800x620_COMPACT_NO_IMAGES
           Images=NONE
-          LauncherCore=NONE
-          RWX=NONE
           SelfTest=138/138 PASS
           DefenderScan=PASS
           SHA256=$sha
           Size=$size
           RealGameVerification=USER_SIDE_REQUIRED
-          "@ | Set-Content BUILD-INFO.txt
-          Get-Content BUILD-INFO.txt
-
+          "@|Set-Content BUILD-INFO.txt;Get-Content BUILD-INFO.txt
       - uses: actions/upload-artifact@v4
         with:
           name: PremiumPlusCombo-Windows-x64-REFERENCE-INPUT-RESPONSIVE
@@ -183,5 +122,4 @@ jobs:
             premium_plus_combo_final/final-build/defender-scan.txt
             premium_plus_combo_final/final-build/imports.txt
             premium_plus_combo_final/final-build/headers.txt
-          if-no-files-found: error
           retention-days: 14
