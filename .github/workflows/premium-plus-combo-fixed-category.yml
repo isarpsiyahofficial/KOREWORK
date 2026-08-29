@@ -32,7 +32,7 @@ jobs:
           $s=(Get-FileHash premium_plus_combo_final/final-build/main.cpp -Algorithm SHA256).Hash.ToLowerInvariant()
           if($s -ne '39000951c06cf167e1b0c9b1d790ceb35eaa0a326bdc5f13a0d752a6898db8dc'){throw "source SHA mismatch $s"}
           $c=Get-Content premium_plus_combo_final/final-build/main.cpp -Raw
-          foreach($n in @('MAPVK_VK_TO_VSC_EX','TapRouted(fresh.seq[index],index+1)','TapRouted(BarToVk(r.cureBar),20)',"TapRouted('Z',2)",'WM_GETMINMAXINFO','BridgeAllKeyboardRouting','MinorReferenceSequenceModel')){if(-not $c.Contains($n)){throw "missing $n"}}
+          foreach($n in @('MAPVK_VK_TO_VSC_EX','TapRouted(vk,index+1)','TapRouted(BarToVk(r.cureBar),20)',"TapRouted('Z',2)",'WM_GETMINMAXINFO','BridgeAllKeyboardRouting','MinorReferenceSequenceModel')){if(-not $c.Contains($n)){throw "missing $n"}}
           foreach($b in @('Gdiplus','g_rightImage','g_leftImage','LoadImageRes','TapNative','CreateProcess','VirtualProtect')){if($c.Contains($b)){throw "obsolete/forbidden $b"}}
           @'
           #include <windows.h>
