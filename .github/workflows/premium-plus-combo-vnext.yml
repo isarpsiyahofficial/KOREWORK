@@ -1,0 +1,288 @@
+name: PremiumPlusCombo Cure Attack Vitals WS
+on:
+  workflow_dispatch:
+  push:
+    branches: [premium-plus-combo-cure-attack-vitals-ws]
+    paths:
+      - 'premium_plus_combo_final/source/vnext_46/**'
+      - '.github/workflows/premium-plus-combo-vnext.yml'
+permissions:
+  contents: read
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Reconstruct exact current and vNext sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force premium_plus_combo_final/vnext-build | Out-Null
+          @'
+          import base64,gzip,pathlib,hashlib,importlib.util
+          root=pathlib.Path('premium_plus_combo_final')
+          p=root/'source'/'timed_exact'
+          raw=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in sorted(p.glob('part*.txt')))))
+          if hashlib.sha256(raw).hexdigest()!='d522959ea955ef788af1df00dfff2dd30bd8566fcbb728823ed39de542d19535': raise SystemExit('baseline source SHA mismatch')
+          cur=root/'vnext-build'/'current.cpp'; cur.write_bytes(raw)
+          spec=importlib.util.spec_from_file_location('delta',root/'source'/'apply_fifo_delta.py')
+          m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); m.apply_delta(cur,cur)
+          if hashlib.sha256(cur.read_bytes()).hexdigest()!='08bb8807b2aa2e3cf416cc8ff417ebbb245bde3128cffe4faf2b7349d82fc8db': raise SystemExit('current working source SHA mismatch')
+          q=root/'source'/'vnext_46'
+          parts=sorted(q.glob('c*.txt'))
+          if len(parts)!=8: raise SystemExit(f'expected 8 vnext chunks got {len(parts)}')
+          text=''.join(x.read_text().strip() for x in parts)
+          nxt=gzip.decompress(base64.b64decode(text))
+          sha=hashlib.sha256(nxt).hexdigest()
+          print('CurrentWorkingSourceSHA256='+hashlib.sha256(cur.read_bytes()).hexdigest().upper())
+          print('VNextSourceSHA256='+sha.upper())
+          if sha!='9a672664e72b09d820fe98b51b0f277bb4c0a267b6b7ad0e5bd7937e9e4837e9': raise SystemExit('vnext source SHA mismatch')
+          (root/'vnext-build'/'main.cpp').write_bytes(nxt)
+          '@ | python -
+          if($LASTEXITCODE){throw 'source reconstruction failed'}
+
+      - name: Preservation and feature gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          from pathlib import Path
+          cur=Path('premium_plus_combo_final/vnext-build/current.cpp').read_text(encoding='utf-8')
+          nxt=Path('premium_plus_combo_final/vnext-build/main.cpp').read_text(encoding='utf-8')
+          def block(s,a,b): return s[s.index(a):s.index(b,s.index(a))]
+          checks=[]
+          checks.append(('RogueSettings',block(cur,'struct RogueSettings {','struct AttackSettings {'),block(nxt,'struct RogueSettings {','struct AttackSettings {')))
+          checks.append(('BridgeAndFifoTransport',block(cur,'bool InitBridge(){','void SendRoutedKey('),block(nxt,'bool InitBridge(){','void SendRoutedKey(')))
+          checks.append(('MinorWorker',block(cur,'void MinorWorker(){','void RWorker(){'),block(nxt,'void MinorWorker(){','void RWorker(){')))
+          checks.append(('RWorker',block(cur,'void RWorker(){','void CureWorker(){'),block(nxt,'void RWorker(){','void CureWorker(){')))
+          checks.append(('RogueUiReader',block(cur,'void ReadRogueUi(','void ReadAttackUi('),block(nxt,'void ReadRogueUi(','void ReadAttackUi(')))
+          checks.append(('RoguePage',block(cur,'void CreateRoguePage(){','void CreateAttackPage(){'),block(nxt,'void CreateRoguePage(){','void CreateAttackPage(){')))
+          checks.append(('ChromeAndDrawing',block(cur,'void LayoutChrome(){','LRESULT CALLBACK WndProc('),block(nxt,'void LayoutChrome(){','LRESULT CALLBACK WndProc(')))
+          for name,a,b in checks:
+              if a!=b: raise SystemExit(name+' changed unexpectedly')
+              print(name+'=PASS')
+          required=[
+            'HANDLE g_cureEvent{}','SetEvent(g_cureEvent)','WaitForSingleObject(g_cureEvent,50)',
+            'ClampD(ReadDword(k,L"DelayMs",125),1,2000)','ReadAttackUi(true);g_attackActive=true',
+            'std::array<int,4> skillDelayMs{1,1,1,1}','Skill%dMs','WCombo','SCombo',
+            'EstimateTypedBarFill','CapturePercent(a.hpRect,true)','CapturePercent(a.mpRect,false)',
+            'IDC_ATTACK_W_COMBO','IDC_ATTACK_S_COMBO','--attack-observer-test','--cure-observer-test',
+            "ReferenceTapKeyUnlocked('W')","ReferenceTapKeyUnlocked('S')"
+          ]
+          for x in required:
+              if x not in nxt: raise SystemExit('missing feature gate: '+x)
+          if 'ClampD(ReadDword(k,L"DelayMs",125),35,2000)' in nxt: raise SystemExit('old 35ms clamp remains')
+          if 'g_attackExclusive=true;{FifoTicketGuard sequence(g_gameInputGate);ReferenceTapKeyUnlocked(BarToVk(bar))' in nxt: raise SystemExit('nested potion exclusive bug remains')
+          print('FeatureGates=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'preservation/feature gate failed'}
+
+      - name: Create resources
+        shell: pwsh
+        working-directory: premium_plus_combo_final/vnext-build
+        run: |
+          @'
+          #include <windows.h>
+          1 VERSIONINFO
+           FILEVERSION 4,6,0,0
+           PRODUCTVERSION 4,6,0,0
+           FILEFLAGSMASK 0x3fL
+           FILEFLAGS 0
+           FILEOS 0x40004L
+           FILETYPE 0x1L
+          BEGIN
+           BLOCK "StringFileInfo"
+           BEGIN
+            BLOCK "041F04E6"
+            BEGIN
+             VALUE "FileDescription", "Premium Plus Combo - Rogue / Attack\0"
+             VALUE "FileVersion", "4.6.0.0\0"
+             VALUE "ProductName", "Premium Plus Combo\0"
+             VALUE "ProductVersion", "4.6.0.0\0"
+            END
+           END
+           BLOCK "VarFileInfo"
+           BEGIN
+            VALUE "Translation", 0x041F, 1254
+           END
+          END
+          '@ | Set-Content app.rc -Encoding Ascii
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="1.0.0.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"/>
+            <description>Premium Plus Combo - Rogue</description>
+            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security></trustInfo>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content final.manifest -Encoding UTF8
+
+      - name: Build native x64
+        shell: pwsh
+        working-directory: premium_plus_combo_final/vnext-build
+        run: |
+          rc /nologo app.rc
+          if($LASTEXITCODE){throw 'rc failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo-Test.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+          if($LASTEXITCODE){throw 'test build failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'final build failed'}
+          mt.exe -manifest final.manifest "-outputresource:PremiumPlusCombo.exe;#1"
+          if($LASTEXITCODE){throw 'manifest embed failed'}
+
+      - name: Logic self test
+        shell: pwsh
+        working-directory: premium_plus_combo_final/vnext-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode){if(Test-Path self-test-report.txt){Get-Content self-test-report.txt};throw "self-test exit $($p.ExitCode)"}
+          $r=Get-Content self-test-report.txt -Raw
+          foreach($n in @('TOTAL=153','PASSED=153','AttackWSAlternation=PASS','AttackLoopAllows1ms=PASS','SkillDelayAllows1ms=PASS','TypedHP_20=PASS','TypedHP_100=PASS','TypedMP_20=PASS','TypedMP_100=PASS','MinorReferenceSequenceModel=PASS','ScanCodeTransport=PASS')){if($r -notmatch [regex]::Escape($n)){Get-Content self-test-report.txt;throw "missing $n"}}
+          if($r -match '=FAIL'){Get-Content self-test-report.txt;throw 'self-test failure'}
+
+      - name: FIFO transport observer regression
+        shell: pwsh
+        working-directory: premium_plus_combo_final/vnext-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--transport-observer-test' -Wait -PassThru
+          if($p.ExitCode){Get-Content transport-observer-report.txt;throw "transport observer exit $($p.ExitCode)"}
+          $r=Get-Content transport-observer-report.txt -Raw;Get-Content transport-observer-report.txt
+          foreach($n in @('ObserverReady=PASS','ScanCodesNonZero=PASS','Overlap=0','RESULT=PASS')){if($r -notmatch [regex]::Escape($n)){throw "transport missing $n"}}
+
+      - name: Attack multi-skill W S observer
+        shell: pwsh
+        working-directory: premium_plus_combo_final/vnext-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--attack-observer-test' -Wait -PassThru
+          if($p.ExitCode){Get-Content attack-observer-report.txt;throw "attack observer exit $($p.ExitCode)"}
+          $r=Get-Content attack-observer-report.txt -Raw;Get-Content attack-observer-report.txt
+          foreach($n in @('ObserverReady=PASS','Z_Down=1','W_Down=2','S_Down=2','Skill2_Down=1','Skill3_Down=1','Skill4_Down=1','Skill5_Down=1','ScanCodesNonZero=PASS','Overlap=0','RESULT=PASS')){if($r -notmatch [regex]::Escape($n)){throw "attack observer missing $n"}}
+
+      - name: Cure first-trigger observer
+        shell: pwsh
+        working-directory: premium_plus_combo_final/vnext-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--cure-observer-test' -Wait -PassThru
+          if($p.ExitCode){Get-Content cure-observer-report.txt;throw "cure observer exit $($p.ExitCode)"}
+          $r=Get-Content cure-observer-report.txt -Raw;Get-Content cure-observer-report.txt
+          foreach($n in @('ObserverReady=PASS','F2_Down=1','6_Down=1','F1_Down=1','ScanCodesNonZero=PASS','Overlap=0','RESULT=PASS')){if($r -notmatch [regex]::Escape($n)){throw "cure observer missing $n"}}
+          if($r -notmatch 'LatencyMs=(\d+)'){throw 'cure latency missing'}
+          if([int]$Matches[1] -ge 250){throw "cure latency too high $($Matches[1])ms"}
+
+      - name: GUI preservation smoke test
+        shell: pwsh
+        working-directory: premium_plus_combo_final/vnext-build
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          using System;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          public static class U {
+            public delegate bool EnumProc(IntPtr h, IntPtr p);
+            [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string c,string t);
+            [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h,EnumProc cb,IntPtr p);
+            [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);
+            [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+            [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
+          }
+          '@ | Add-Type
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -PassThru
+          try {
+            $h=[IntPtr]::Zero
+            for($i=0;$i -lt 80 -and $h -eq [IntPtr]::Zero;$i++){Start-Sleep -Milliseconds 100;$h=[U]::FindWindow($null,'Premium Plus Combo - Rogue')}
+            if($h -eq [IntPtr]::Zero){throw 'main window not found'}
+            function VisibleMap([IntPtr]$parent){$m=@{};$cb=[U+EnumProc]{param($c,$x);if([U]::IsWindowVisible($c)){$id=[U]::GetDlgCtrlID($c);$sb=New-Object Text.StringBuilder 256;[void][U]::GetWindowText($c,$sb,256);$m[$id]=$sb.ToString()};return $true};[void][U]::EnumChildWindows($parent,$cb,[IntPtr]::Zero);return $m}
+            $r=VisibleMap $h
+            foreach($id in @(1402,1403,1420,1421,1422,1520,1521)){if(-not $r.ContainsKey($id)){throw "Rogue UI id $id missing"}}
+            $script:attack=[IntPtr]::Zero;$cb=[U+EnumProc]{param($c,$x);if([U]::GetDlgCtrlID($c)-eq 1521){$script:attack=$c};return $true};[void][U]::EnumChildWindows($h,$cb,[IntPtr]::Zero)
+            if($script:attack -eq [IntPtr]::Zero){throw 'Attack category button missing'}
+            [void][U]::SendMessage($script:attack,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero);Start-Sleep -Milliseconds 150
+            $a=VisibleMap $h
+            foreach($id in @(1530,1531,1540,1541,1542,1543,1544,1545,1560,1561,1562,1563,1570,1571,1572,1573,1580,1581,1582,1583,1599,1610,1611,1612,1613)){if(-not $a.ContainsKey($id)){throw "Attack UI id $id missing"}}
+            'RogueUI=PASS'|Set-Content gui-smoke.txt
+            'AttackUI=PASS'|Add-Content gui-smoke.txt
+            'WSControls=PASS'|Add-Content gui-smoke.txt
+            'PerSkillMSControls=PASS'|Add-Content gui-smoke.txt
+          } finally {if($p -and -not $p.HasExited){Stop-Process -Id $p.Id -Force}}
+
+      - name: PE manifest and Defender
+        shell: pwsh
+        working-directory: premium_plus_combo_final/vnext-build
+        run: |
+          mt.exe "-inputresource:PremiumPlusCombo.exe;#1" -out:embedded.manifest
+          if($LASTEXITCODE){throw 'manifest extract failed'}
+          dumpbin /headers PremiumPlusCombo.exe | Set-Content headers.txt
+          dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
+          $h=Get-Content headers.txt -Raw;$i=Get-Content imports.txt -Raw
+          if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
+          if($h -match 'E0000060'){throw 'RWX section found'}
+          foreach($b in @('WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll')){if($i -match [regex]::Escape($b)){throw "unexpected import $b"}}
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(-not(Test-Path $mp)){$mp=Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform" -Directory|Sort-Object Name -Descending|%{Join-Path $_.FullName 'MpCmdRun.exe'}|?{Test-Path $_}|Select-Object -First 1}
+          if(-not $mp){throw 'Defender unavailable'}
+          & $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo.exe) -DisableRemediation
+          if($LASTEXITCODE){throw "Defender exit $LASTEXITCODE"}
+          'DefenderScan=PASS'|Set-Content defender-scan.txt
+
+      - name: Final report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/vnext-build
+        run: |
+          $sha=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash
+          $size=(Get-Item PremiumPlusCombo.exe).Length
+          $cure=(Get-Content cure-observer-report.txt|Where-Object{$_ -like 'LatencyMs=*'})
+          @"
+          Product=PremiumPlusCombo
+          Version=4.6.0.0
+          Historical062FReferenceSHA256=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856
+          CurrentUserVerifiedExeSHA256=3B47E4CEBDF5E49592BA4E0F6A87FD1426E8C2023903771C970450F12D8908BA
+          CurrentUserVerifiedSourceSHA256=08BB8807B2AA2E3CF416CC8FF417EBBB245BDE3128CFFE4FAF2B7349D82FC8DB
+          VNextSourceSHA256=9A672664E72B09D820FE98B51B0F277BB4C0A267B6B7AD0E5BD7937E9E4837E9
+          WorkingStructurePreservation=PASS
+          RogueSettingsPreserved=PASS
+          RoguePagePreserved=PASS
+          MinorWorkerPreserved=PASS
+          RWorkerPreserved=PASS
+          FIFOScanCodeTransportPreserved=PASS
+          CureEventPriority=PASS
+          $cure
+          AttackLoop1ms=PASS
+          AttackSkills1to4=PASS
+          PerSkillMS=PASS
+          WCombo=PASS
+          SCombo=PASS
+          TypedHPBarDetector=PASS
+          TypedMPBarDetector=PASS
+          LiveVitalsScan=PASS
+          AttackObserver=PASS
+          CureObserver=PASS
+          TransportObserverOverlap=0
+          SelfTest=153/153 PASS
+          GUISmoke=PASS
+          DefenderScan=PASS
+          SHA256=$sha
+          Size=$size
+          RealGameVerification=USER_SIDE_REQUIRED_FOR_THIS_VNEXT
+          "@ | Set-Content BUILD-INFO.txt
+          Get-Content BUILD-INFO.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-Windows-x64-v4.6-CURE-ATTACK-VITALS-WS
+          path: |
+            premium_plus_combo_final/vnext-build/PremiumPlusCombo.exe
+            premium_plus_combo_final/vnext-build/BUILD-INFO.txt
+            premium_plus_combo_final/vnext-build/self-test-report.txt
+            premium_plus_combo_final/vnext-build/transport-observer-report.txt
+            premium_plus_combo_final/vnext-build/attack-observer-report.txt
+            premium_plus_combo_final/vnext-build/cure-observer-report.txt
+            premium_plus_combo_final/vnext-build/gui-smoke.txt
+            premium_plus_combo_final/vnext-build/defender-scan.txt
+            premium_plus_combo_final/vnext-build/embedded.manifest
+          retention-days: 14
