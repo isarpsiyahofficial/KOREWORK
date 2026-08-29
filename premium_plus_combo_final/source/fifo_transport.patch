@@ -1,0 +1,286 @@
+--- a/main.cpp
++++ b/main.cpp
+@@ -137,8 +137,28 @@
+ RogueSettings g_rogue;
+ AttackSettings g_attack;
+ std::mutex g_settingsMutex;
+-std::mutex g_actionMutex;
+-std::mutex g_bridgeWriteMutex;
++
++struct FifoTicketLock {
++  std::atomic<unsigned long> nextTicket{0};
++  std::atomic<unsigned long> serving{0};
++  unsigned long lock(){
++    const unsigned long ticket=nextTicket.fetch_add(1,std::memory_order_acq_rel);
++    unsigned spin=0;
++    while(serving.load(std::memory_order_acquire)!=ticket){
++      if((++spin&0x3f)==0)SwitchToThread(); else YieldProcessor();
++    }
++    return ticket;
++  }
++  void unlock(unsigned long ticket){serving.store(ticket+1,std::memory_order_release);}
++};
++struct FifoTicketGuard {
++  FifoTicketLock& lockRef; unsigned long ticket;
++  explicit FifoTicketGuard(FifoTicketLock& l):lockRef(l),ticket(l.lock()){}
++  ~FifoTicketGuard(){lockRef.unlock(ticket);}
++  FifoTicketGuard(const FifoTicketGuard&)=delete;
++  FifoTicketGuard& operator=(const FifoTicketGuard&)=delete;
++};
++FifoTicketLock g_gameInputGate;
+ std::atomic<bool> g_running{true};
+ std::atomic<bool> g_minorActive{false};
+ std::atomic<bool> g_attackActive{false};
+@@ -161,6 +181,13 @@
+ POINT g_calStart{},g_calCurrent{};
+ std::atomic<int> g_calTarget{0};
+ std::atomic<bool> g_dragging{false};
++std::atomic<bool> g_observerReady{false};
++std::array<std::atomic<int>,256> g_observerDownCount{};
++std::array<std::atomic<int>,256> g_observerScanNonZero{};
++std::atomic<int> g_observerActiveDown{0};
++std::atomic<int> g_observerOverlap{0};
++std::atomic<DWORD> g_observerThreadId{0};
++HHOOK g_observerHook{};
+ 
+ DWORD ReadDword(HKEY k,const wchar_t* n,DWORD d){ DWORD t=0,v=0,s=sizeof(v); return RegQueryValueExW(k,n,nullptr,&t,(BYTE*)&v,&s)==ERROR_SUCCESS&&t==REG_DWORD?v:d; }
+ void WriteDword(HKEY k,const wchar_t* n,DWORD v){ RegSetValueExW(k,n,0,REG_DWORD,(BYTE*)&v,sizeof(v)); }
+@@ -216,8 +243,8 @@
+ void AppendKeyPair(std::vector<INPUT>& out,int vk){INPUT d{},u{};BuildKeyInput(d,vk,false);BuildKeyInput(u,vk,true);out.push_back(d);out.push_back(u);}
+ 
+ // Exact 062F producer ordering: event data -> event.sequence -> shared writeSequence.
+-// Never advertise writeSequence before the ring event is complete.
+-bool PublishBridgeInputs(const INPUT* inputs,UINT count){
++// Called only while the single FIFO game-input gate is owned.
++bool PublishBridgeInputsUnlocked(const INPUT* inputs,UINT count){
+   if(!inputs||!count||!BridgeReceiverLive())return false;
+   struct Decoded{uint32_t vk,scan,flags;};
+   std::vector<Decoded> decoded;decoded.reserve(count);
+@@ -235,7 +262,6 @@
+     if((in.ki.dwFlags&KEYEVENTF_EXTENDEDKEY)||(scan&0xFF00u))flags|=BridgeExtended;
+     decoded.push_back({(uint32_t)vk,(uint32_t)(scan&0xFFu),flags});
+   }
+-  std::lock_guard<std::mutex> lk(g_bridgeWriteMutex);
+   if(!BridgeReceiverLive())return false;
+   LONG64 seq=InterlockedCompareExchange64(&g_bridge->writeSequence,0,0);
+   for(const auto& d:decoded){
+@@ -262,8 +288,8 @@
+   }
+   return in;
+ }
+-bool SendOneReferenceInput(const INPUT& source){
+-  if(PublishBridgeInputs(&source,1))return true;
++bool SendOneReferenceInputUnlocked(const INPUT& source){
++  if(PublishBridgeInputsUnlocked(&source,1))return true;
+   INPUT native=NativeNormalizedInput(source);
+   return SendInput(1,&native,sizeof(INPUT))==1;
+ }
+@@ -272,46 +298,48 @@
+          !(down.ki.dwFlags&KEYEVENTF_KEYUP)&&(up.ki.dwFlags&KEYEVENTF_KEYUP)&&
+          down.ki.wVk==up.ki.wVk&&down.ki.wScan==up.ki.wScan;
+ }
+-UINT ReferenceSendInputs(const INPUT* inputs,UINT count){
++UINT ReferenceSendInputsUnlocked(const INPUT* inputs,UINT count){
+   if(!inputs||!count)return 0;
+   bool allKeyboard=true;for(UINT i=0;i<count;i++)if(inputs[i].type!=INPUT_KEYBOARD){allKeyboard=false;break;}
+   if(!allKeyboard){
+-    if(PublishBridgeInputs(inputs,count))return count;
++    if(PublishBridgeInputsUnlocked(inputs,count))return count;
+     std::vector<INPUT> native;native.reserve(count);for(UINT i=0;i<count;i++)native.push_back(NativeNormalizedInput(inputs[i]));
+     return SendInput(count,native.data(),sizeof(INPUT));
+   }
+-  if(BridgeReceiverLive()&&PublishBridgeInputs(inputs,count))return count;
++  bool allBridge=true;
++  for(UINT i=0;i<count;i++){
++    int vk=(int)inputs[i].ki.wVk;
++    if(!vk&&inputs[i].ki.wScan)vk=(int)MapVirtualKeyW(inputs[i].ki.wScan,MAPVK_VSC_TO_VK_EX);
++    if(!IsBridgeInputKey(vk)){allBridge=false;break;}
++  }
++  if(allBridge&&BridgeReceiverLive()&&PublishBridgeInputsUnlocked(inputs,count))return count;
+   UINT done=0;
+-  std::lock_guard<std::mutex> nativeLock(g_bridgeWriteMutex);
+   while(done<count){
+     bool pair=(done+1<count)&&MatchingDownUpPair(inputs[done],inputs[done+1]);
+     INPUT first=NativeNormalizedInput(inputs[done]);
+     if(SendInput(1,&first,sizeof(INPUT))!=1)break;
+     if(pair){
+       PreciseDelayUs(1000);
+       INPUT second=NativeNormalizedInput(inputs[done+1]);
+       if(SendInput(1,&second,sizeof(INPUT))!=1){Sleep(1);if(SendInput(1,&second,sizeof(INPUT))!=1)break;}
+-      done+=2;PreciseDelayUs(50);
++      done+=2;PreciseDelayUs(75);
+     }else{
+       bool up=(inputs[done].ki.dwFlags&KEYEVENTF_KEYUP)!=0;
+-      ++done;PreciseDelayUs(up?50:1000);
++      ++done;PreciseDelayUs(up?75:1000);
+     }
+   }
+   return done;
+ }
++
++UINT ReferenceSendInputs(const INPUT* inputs,UINT count){FifoTicketGuard gate(g_gameInputGate);return ReferenceSendInputsUnlocked(inputs,count);}
+ 
+-bool ReferenceTapKey(int vk){
++bool ReferenceTapKeyUnlocked(int vk){
+   INPUT pair[2]{};BuildKeyInput(pair[0],vk,false);BuildKeyInput(pair[1],vk,true);
+-  return ReferenceSendInputs(pair,2)==2;
++  return ReferenceSendInputsUnlocked(pair,2)==2;
+ }
++bool ReferenceTapKey(int vk){FifoTicketGuard gate(g_gameInputGate);return ReferenceTapKeyUnlocked(vk);}
+ bool SendRoutedKey(int vk){
+-  INPUT pair[2]{};BuildKeyInput(pair[0],vk,false);BuildKeyInput(pair[1],vk,true);return ReferenceSendInputs(pair,2)==2;
++  FifoTicketGuard gate(g_gameInputGate);return ReferenceTapKeyUnlocked(vk);
+ }
+-void ReleaseKeys(){int keys[]={ 'R','Z','0','1','2','3','4','5','6','7','8','9',VK_F1,VK_F2,VK_F3,VK_F4,VK_F5,VK_F6,VK_F7,VK_F8,VK_F9,VK_F10,VK_F11,VK_F12};for(int vk:keys){INPUT in{};BuildKeyInput(in,vk,true);ReferenceSendInputs(&in,1);}}
++void ReleaseKeys(){FifoTicketGuard gate(g_gameInputGate);int keys[]={ 'R','Z','0','1','2','3','4','5','6','7','8','9',VK_F1,VK_F2,VK_F3,VK_F4,VK_F5,VK_F6,VK_F7,VK_F8,VK_F9,VK_F10,VK_F11,VK_F12};for(int vk:keys){INPUT in{};BuildKeyInput(in,vk,true);ReferenceSendInputsUnlocked(&in,1);}}
+ 
+ void SetPower(bool on){g_power=on;if(!on){g_minorActive=false;g_attackActive=false;ReleaseKeys();}else RefreshStatus();RefreshStatus();}
+@@ -370,7 +398,7 @@
+     }
+     if(!g_power||!g_minorActive||g_cureExclusive){Sleep(1);next=Clock::now();continue;}
+     RogueSettings s=RogueSnapshot();
+-    {std::lock_guard<std::mutex> lk(g_actionMutex);std::vector<INPUT> batch;batch.reserve(6);AppendKeyPair(batch,s.seq[0]);AppendKeyPair(batch,s.seq[1]);AppendKeyPair(batch,s.seq[2]);ReferenceSendInputs(batch.data(),(UINT)batch.size());}
++    {std::vector<INPUT> batch;batch.reserve(6);AppendKeyPair(batch,s.seq[0]);AppendKeyPair(batch,s.seq[1]);AppendKeyPair(batch,s.seq[2]);ReferenceSendInputs(batch.data(),(UINT)batch.size());}
+     int cps=s.turbo?240:120;
+     auto step=std::chrono::microseconds(1000000/cps);next+=step;
+     auto now=Clock::now();if(now-next>step*8)next=now;
+@@ -385,7 +413,7 @@
+     }
+     RogueSettings s=RogueSnapshot();
+     if(!s.rEnabled||g_cureExclusive||GetTickCount64()<g_rPauseUntil){Sleep(1);continue;}
+-    {std::lock_guard<std::mutex> lk(g_actionMutex);ReferenceTapKey('R');}
++    ReferenceTapKey('R');
+     Sleep(s.turbo?s.rTurbo:s.rMax);
+   }
+ }
+@@ -401,11 +429,12 @@
+       int bar=s.cureBar,slot=s.cureSlot,restore=s.restoreBar;
+       g_rPauseUntil=GetTickCount64()+2000;
+       bool wasR=s.rEnabled;
+-      {std::lock_guard<std::mutex> lk(g_actionMutex);
+-       ReferenceTapKey(VK_F1+bar-1);Sleep(28);ReferenceTapKey('0'+slot);Sleep(45);ReferenceTapKey(VK_F1+restore-1);}
++      {FifoTicketGuard sequence(g_gameInputGate);
++       ReferenceTapKeyUnlocked(VK_F1+bar-1);Sleep(28);ReferenceTapKeyUnlocked(slot==10?'0':'0'+slot);Sleep(45);ReferenceTapKeyUnlocked(VK_F1+restore-1);}
+       if(!wasR)g_rPauseUntil=0;
+       g_cureExclusive=false;
+     }
++    Sleep(1);
+   }
+ }
+@@ -442,10 +471,10 @@
+ void TriggerPotion(int bar,int slot){
+-  std::lock_guard<std::mutex> lk(g_actionMutex);
++  FifoTicketGuard sequence(g_gameInputGate);
+   int restore=AttackSnapshot().restoreBar;
+-  ReferenceTapKey(VK_F1+bar-1);Sleep(18);ReferenceTapKey(slot==10?'0':'0'+slot);Sleep(25);ReferenceTapKey(VK_F1+restore-1);
++  ReferenceTapKeyUnlocked(VK_F1+bar-1);Sleep(18);ReferenceTapKeyUnlocked(slot==10?'0':'0'+slot);Sleep(25);ReferenceTapKeyUnlocked(VK_F1+restore-1);
+ }
+ 
+ void AttackWorker(){
+@@ -462,11 +491,11 @@
+     }
+     if(!g_power||!g_attackActive||g_cureExclusive){Sleep(1);continue;}
+     AttackSettings a=AttackSnapshot();
+-    {std::lock_guard<std::mutex> lk(g_actionMutex);
+-      ReferenceTapKey('Z');
+-      for(auto& s:a.skills)if(s.enabled){ReferenceTapKey(VK_F1+s.bar-1);Sleep(12);ReferenceTapKey(s.slot==10?'0':'0'+s.slot);Sleep(18);}
+-      ReferenceTapKey(VK_F1+a.restoreBar-1);
++    {FifoTicketGuard sequence(g_gameInputGate);
++      ReferenceTapKeyUnlocked('Z');
++      for(auto& s:a.skills)if(s.enabled){ReferenceTapKeyUnlocked(VK_F1+s.bar-1);Sleep(12);ReferenceTapKeyUnlocked(s.slot==10?'0':'0'+s.slot);Sleep(18);}
++      ReferenceTapKeyUnlocked(VK_F1+a.restoreBar-1);
+     }
+     Sleep(a.intervalMs);
+   }
+@@ -757,6 +786,87 @@
+   return DefWindowProcW(hwnd,msg,wp,lp);
+ }
+ 
++LRESULT CALLBACK TransportObserverProc(int code,WPARAM wp,LPARAM lp){
++  if(code==HC_ACTION&&(wp==WM_KEYDOWN||wp==WM_SYSKEYDOWN||wp==WM_KEYUP||wp==WM_SYSKEYUP)){
++    auto* k=reinterpret_cast<KBDLLHOOKSTRUCT*>(lp);
++    if(k&&k->dwExtraInfo==kMagicInput){
++      int vk=(int)k->vkCode;
++      if(vk>=0&&vk<256){
++        bool down=wp==WM_KEYDOWN||wp==WM_SYSKEYDOWN;
++        if(down){
++          g_observerDownCount[vk].fetch_add(1);
++          if(k->scanCode)g_observerScanNonZero[vk].fetch_add(1);
++          int prior=g_observerActiveDown.fetch_add(1);
++          if(prior!=0)g_observerOverlap.fetch_add(1);
++        }else{
++          g_observerActiveDown.fetch_sub(1);
++        }
++      }
++    }
++  }
++  return CallNextHookEx(nullptr,code,wp,lp);
++}
++
++DWORD WINAPI TransportObserverThread(LPVOID){
++  g_observerThreadId=GetCurrentThreadId();
++  g_observerHook=SetWindowsHookExW(WH_KEYBOARD_LL,TransportObserverProc,g_instance,0);
++  g_observerReady=(g_observerHook!=nullptr);
++  MSG msg{};
++  while(GetMessageW(&msg,nullptr,0,0)>0){}
++  if(g_observerHook){UnhookWindowsHookEx(g_observerHook);g_observerHook=nullptr;}
++  return 0;
++}
++
++bool RunTransportObserverTest(){
++  for(auto& c:g_observerDownCount)c=0;
++  for(auto& c:g_observerScanNonZero)c=0;
++  g_observerActiveDown=0;g_observerOverlap=0;g_observerReady=false;g_observerThreadId=0;
++  InitBridge();
++  if(g_bridge)InterlockedExchange64(&g_bridge->gameHeartbeatMs,0);
++  HANDLE observer=CreateThread(nullptr,0,TransportObserverThread,nullptr,0,nullptr);
++  if(!observer)return false;
++  for(int i=0;i<200&&!g_observerReady;i++)Sleep(5);
++  if(!g_observerReady){PostThreadMessageW(g_observerThreadId,WM_QUIT,0,0);WaitForSingleObject(observer,1000);CloseHandle(observer);return false;}
++  auto worker=[](LPVOID p)->DWORD{
++    int vk=(int)(INT_PTR)p;
++    for(int i=0;i<24;i++)ReferenceTapKey(vk);
++    return 0;
++  };
++  HANDLE threads[4]{};int keys[4]={'8','9','0','R'};
++  for(int i=0;i<4;i++)threads[i]=CreateThread(nullptr,0,worker,(LPVOID)(INT_PTR)keys[i],0,nullptr);
++  WaitForMultipleObjects(4,threads,TRUE,10000);
++  for(HANDLE h:threads)if(h)CloseHandle(h);
++  Sleep(100);
++  PostThreadMessageW(g_observerThreadId,WM_QUIT,0,0);
++  WaitForSingleObject(observer,2000);CloseHandle(observer);
++  bool scanOk=true,countOk=true;
++  for(int vk:keys){if(g_observerDownCount[vk].load()<=0)countOk=false;if(g_observerScanNonZero[vk].load()!=g_observerDownCount[vk].load())scanOk=false;}
++  std::ofstream out("transport-observer-report.txt");
++  out<<"ObserverReady="<<(g_observerReady?"PASS":"FAIL")<<"\n";
++  out<<"8_Down="<<g_observerDownCount['8'].load()<<"\n";
++  out<<"9_Down="<<g_observerDownCount['9'].load()<<"\n";
++  out<<"0_Down="<<g_observerDownCount['0'].load()<<"\n";
++  out<<"R_Down="<<g_observerDownCount['R'].load()<<"\n";
++  out<<"ScanCodesNonZero="<<(scanOk?"PASS":"FAIL")<<"\n";
++  out<<"Overlap="<<g_observerOverlap.load()<<"\n";
++  bool ok=g_observerReady&&scanOk&&countOk&&g_observerOverlap.load()==0&&g_observerActiveDown.load()==0;
++  out<<"RESULT="<<(ok?"PASS":"FAIL")<<"\n";
++  return ok;
++}
++
+ bool RunSelfTest(){
+   std::vector<std::pair<std::string,bool>> t;
+   auto test=[&](const char* n,bool ok){t.push_back({n,ok});};
+@@ -766,6 +876,8 @@
+   test("AttackIndependentState",&g_attackActive!=&g_minorActive);
+   test("MinorReferenceSequenceModel",g_rogue.seq[0]=='8'&&g_rogue.seq[1]=='9'&&g_rogue.seq[2]=='0');
+   test("BridgeSelectiveRouting",IsBridgeInputKey('1')&&IsBridgeInputKey('0')&&IsBridgeInputKey('R')&&!IsBridgeInputKey('Z')&&!IsBridgeInputKey(VK_F1)&&!IsBridgeInputKey(VK_F12));
++  test("ScanCodeTransport",(NativeNormalizedInput([]{INPUT i{};BuildKeyInput(i,'8',false);return i;}()).ki.dwFlags&KEYEVENTF_SCANCODE)!=0);
++  test("FifoTicketLockInitial",g_gameInputGate.nextTicket.load()==0&&g_gameInputGate.serving.load()==0);
+   test("PPCOMBOInputMarker",kMagicInput==0x5050434F4D424FULL);
+   test("ReferenceQPCScheduler",true);
+   test("MinorMaximum120",120==120);
+@@ -824,6 +936,7 @@
+ int APIENTRY wWinMain(HINSTANCE h,HINSTANCE,LPWSTR cmd,int show){
+   g_instance=h;
+   if(cmd&&wcsstr(cmd,L"--self-test"))return RunSelfTest()?0:2;
++  if(cmd&&wcsstr(cmd,L"--transport-observer-test"))return RunTransportObserverTest()?0:3;
+   INITCOMMONCONTROLSEX ic{sizeof(ic),ICC_STANDARD_CLASSES|ICC_BAR_CLASSES};InitCommonControlsEx(&ic);
+   LoadSettings();InitBridge();
+   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
