@@ -44,7 +44,7 @@ jobs:
           '@ | python -
           if($LASTEXITCODE -ne 0){throw 'reconstruction failed'}
           $sha=(Get-FileHash premium_plus_combo_final/final-build/main.cpp -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($sha -ne '8ecd1e6483646b4c84771292300b5db78e7b87560fbfc2a3604f1d01ade1b7aa'){throw "source SHA mismatch: $sha"}
+          if($sha -ne '9076c0bd829a91984babc1703375427e119f30397d4d8d3089f9e0965a39e628'){throw "source SHA mismatch: $sha"}
           if((Get-FileHash premium_plus_combo_final/final-build/left.jpg -Algorithm SHA256).Hash.ToLowerInvariant() -ne '4a6a3dbfbb47e4c55b89f491b8c06925eee206cd9a213a48f1f9625a3d4822ed'){throw 'left resource mismatch'}
           if((Get-FileHash premium_plus_combo_final/final-build/right.jpg -Algorithm SHA256).Hash.ToLowerInvariant() -ne '704328405933e1aa423acdf257c6ed6ca985f556d82980a3cbd1e8bf01b94146'){throw 'right resource mismatch'}
           $code=Get-Content premium_plus_combo_final/final-build/main.cpp -Raw
@@ -136,7 +136,7 @@ jobs:
           Architecture=x64
           StaticCRT=PASS
           ReferenceSHA256=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856
-          SourceSHA256=8ECD1E6483646B4C84771292300B5DB78E7B87560FBFC2A3604F1D01ADE1B7AA
+          SourceSHA256=9076C0BD829A91984BABC1703375427E119F30397D4D8D3089F9E0965A39E628
           UI=800px reference-style + left ROGUE/ATTACK navigation
           Minor=separate Start/Stop + GameBridge v1 + 150/300 target
           Attack=independent Start/Stop + Z + per-skill F1-F12/1-0
