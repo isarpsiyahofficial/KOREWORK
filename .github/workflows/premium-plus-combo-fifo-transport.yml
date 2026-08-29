@@ -4,7 +4,7 @@ on:
   push:
     branches: [premium-plus-combo-timed-input-fix]
     paths:
-      - 'premium_plus_combo_final/source/fifo_transport/**'
+      - 'premium_plus_combo_final/source/fifo_transport_v2/**'
       - '.github/workflows/premium-plus-combo-fifo-transport.yml'
 permissions:
   contents: read
@@ -22,18 +22,17 @@ jobs:
           New-Item -ItemType Directory -Force premium_plus_combo_final/fifo-build | Out-Null
           @'
           import base64,gzip,pathlib,hashlib
-          def unpack(folder):
-              parts=sorted(pathlib.Path(folder).glob('part*.txt'))
+          def unpack(folder,pattern):
+              parts=sorted(pathlib.Path(folder).glob(pattern))
+              print(folder,'chunks',len(parts),[len(x.read_text().strip()) for x in parts])
               return gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in parts)))
-          mod=unpack('premium_plus_combo_final/source/fifo_transport')
+          mod=unpack('premium_plus_combo_final/source/fifo_transport_v2','c*.txt')
           if hashlib.sha256(mod).hexdigest()!='08bb8807b2aa2e3cf416cc8ff417ebbb245bde3128cffe4faf2b7349d82fc8db':
               raise SystemExit('FIFO source SHA mismatch')
-          base=unpack('premium_plus_combo_final/source/timed_exact')
+          base=unpack('premium_plus_combo_final/source/timed_exact','part*.txt')
           if hashlib.sha256(base).hexdigest()!='d522959ea955ef788af1df00dfff2dd30bd8566fcbb728823ed39de542d19535':
               raise SystemExit('baseline source SHA mismatch')
           bs=base.decode('utf-8'); ms=mod.decode('utf-8')
-          # Hard preservation gates: application identity, Turkish UI/settings structs,
-          # registry load/save and all UI/layout code are byte-for-byte unchanged.
           if bs[:bs.index('HINSTANCE g_instance{}')] != ms[:ms.index('HINSTANCE g_instance{}')]:
               raise SystemExit('identity/struct/UI constants changed')
           if bs[bs.index('DWORD ReadDword'):bs.index('bool InitBridge')] != ms[ms.index('DWORD ReadDword'):ms.index('bool InitBridge')]:
