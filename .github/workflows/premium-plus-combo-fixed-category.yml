@@ -1,4 +1,4 @@
-name: PremiumPlusCombo Exact 062F Input Build
+name: PremiumPlusCombo Exact 062F Elevated Input Build
 on:
   workflow_dispatch:
   push:
@@ -37,8 +37,8 @@ jobs:
           @'
           #include <windows.h>
           1 VERSIONINFO
-           FILEVERSION 4,2,0,0
-           PRODUCTVERSION 4,2,0,0
+           FILEVERSION 4,3,0,0
+           PRODUCTVERSION 4,3,0,0
            FILEFLAGSMASK 0x3fL
            FILEFLAGS 0
            FILEOS 0x40004L
@@ -49,9 +49,9 @@ jobs:
             BLOCK "041F04E6"
             BEGIN
              VALUE "FileDescription", "Premium Plus Combo - Rogue / Attack\0"
-             VALUE "FileVersion", "4.2.0.0\0"
+             VALUE "FileVersion", "4.3.0.0\0"
              VALUE "ProductName", "Premium Plus Combo\0"
-             VALUE "ProductVersion", "4.2.0.0\0"
+             VALUE "ProductVersion", "4.3.0.0\0"
             END
            END
            BLOCK "VarFileInfo"
@@ -60,31 +60,38 @@ jobs:
            END
           END
           '@ | Set-Content premium_plus_combo_final/final-build/app.rc -Encoding Ascii
-      - name: Build native x64 single EXE
+      - name: Build test and elevated final x64 EXEs
         shell: pwsh
         working-directory: premium_plus_combo_final/final-build
         run: |
           rc /nologo app.rc; if($LASTEXITCODE){throw 'rc failed'}
-          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
-          if($LASTEXITCODE){throw 'cl failed'}
-      - name: Behavior tests
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo-Test.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+          if($LASTEXITCODE){throw 'test cl failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='requireAdministrator' uiAccess='false'"
+          if($LASTEXITCODE){throw 'final cl failed'}
+      - name: Behavior tests from identical source
         shell: pwsh
         working-directory: premium_plus_combo_final/final-build
         run: |
-          $p=Start-Process .\PremiumPlusCombo.exe -ArgumentList '--self-test' -Wait -PassThru; if($p.ExitCode){throw "self-test exit $($p.ExitCode)"}
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--self-test' -Wait -PassThru; if($p.ExitCode){throw "self-test exit $($p.ExitCode)"}
           $r=Get-Content self-test-report.txt -Raw
           if($r -notmatch 'TOTAL=138' -or $r -notmatch 'PASSED=138' -or $r -match '=FAIL'){Get-Content self-test-report.txt;throw 'self-test failed'}
           foreach($n in @('BridgeAllKeyboardRouting=PASS','MinorReferenceSequenceModel=PASS','AttackPerSkillBarSlotSequence=PASS','SkillBarF1ToF12Mapping=PASS','NonCapsHotkeyMapping=PASS','CureSequenceF2_6_F1=PASS')){if($r -notmatch [regex]::Escape($n)){throw "missing $n"}}
-      - name: PE and import sanity
+      - name: Verify final manifest and PE
         shell: pwsh
         working-directory: premium_plus_combo_final/final-build
         run: |
+          mt.exe "-inputresource:PremiumPlusCombo.exe;#1" -out:embedded.manifest
+          if($LASTEXITCODE){throw 'manifest extraction failed'}
+          $m=Get-Content embedded.manifest -Raw
+          if($m -notmatch 'requireAdministrator'){throw 'final manifest is not requireAdministrator'}
+          if($m -match 'level=.asInvoker'){throw 'asInvoker leaked into final manifest'}
           dumpbin /headers PremiumPlusCombo.exe | Set-Content headers.txt; dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
           $h=Get-Content headers.txt -Raw;$i=Get-Content imports.txt -Raw
           if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
           foreach($b in @('gdiplus.dll','WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll')){if($i -match [regex]::Escape($b)){throw "unexpected import $b"}}
           if($h -match 'E0000060'){throw 'RWX section'}
-      - name: Microsoft Defender
+      - name: Microsoft Defender final EXE
         shell: pwsh
         working-directory: premium_plus_combo_final/final-build
         run: |
@@ -97,9 +104,11 @@ jobs:
           $sha=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash;$size=(Get-Item PremiumPlusCombo.exe).Length
           @"
           Product=PremiumPlusCombo
-          Version=4.2.0.0
+          Version=4.3.0.0
           ReferenceWorkingMinorSHA256=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856
           SourceSHA256=2DB77520FF86E6126216A52BBDA9BB06A0B9A5AC31776895CD99B29BEF9C978A
+          Manifest=requireAdministrator
+          ReferenceManifest=requireAdministrator
           MinorInput=EXACT_062F_BATCH_6_EVENTS_QPC_120_240
           BridgeCommitOrder=EVENT_DATA_THEN_EVENT_SEQUENCE_THEN_WRITE_SEQUENCE
           InputMarker=PPCOMBO_EXACT_062F
@@ -115,10 +124,11 @@ jobs:
           "@|Set-Content BUILD-INFO.txt;Get-Content BUILD-INFO.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: PremiumPlusCombo-Windows-x64-EXACT-062F-INPUT
+          name: PremiumPlusCombo-Windows-x64-EXACT-062F-ELEVATED
           path: |
             premium_plus_combo_final/final-build/PremiumPlusCombo.exe
             premium_plus_combo_final/final-build/main.cpp
+            premium_plus_combo_final/final-build/embedded.manifest
             premium_plus_combo_final/final-build/BUILD-INFO.txt
             premium_plus_combo_final/final-build/self-test-report.txt
             premium_plus_combo_final/final-build/defender-scan.txt
