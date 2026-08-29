@@ -6,6 +6,7 @@ on:
     paths:
       - 'premium_plus_combo_final/source/vnext_48/v481_to_v482.patch.gz.b64'
       - 'premium_plus_combo_final/source/vnext_48/v482_to_v4821.patch.gz.b64'
+      - 'premium_plus_combo_final/source/vnext_48/v4821_to_v4822.patch.gz.b64'
       - '.github/workflows/premium-plus-combo-v482-final.yml'
 permissions:
   contents: read
@@ -30,13 +31,13 @@ jobs:
           old=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in ps)))
           if hashlib.sha256(old).hexdigest()!='e2598a67b26cb0efb4aea05ac4c329d9f4098fcdef645f2e6ef0d5a3ca0f1f07': raise SystemExit('v47 sha mismatch')
           (o/'reference-v47.cpp').write_bytes(old);(o/'main.cpp').write_bytes(old)
-          for name,strip in [('v47_to_v48.patch.gz.b64',0),('v48_observer_fix2.patch.gz.b64',0),('v481_to_v482.patch.gz.b64',1),('v482_to_v4821.patch.gz.b64',1)]:
+          for name,strip in [('v47_to_v48.patch.gz.b64',0),('v48_observer_fix2.patch.gz.b64',0),('v481_to_v482.patch.gz.b64',1),('v482_to_v4821.patch.gz.b64',1),('v4821_to_v4822.patch.gz.b64',1)]:
               raw=gzip.decompress(base64.b64decode((r/'source'/'vnext_48'/name).read_text().strip()))
               patch=o/(name+'.patch');patch.write_bytes(raw)
               subprocess.run(['git','apply',f'-p{strip}',patch.name],cwd=o,check=True)
               p=o/'main.cpp';p.write_bytes(p.read_bytes().replace(b'\r\n',b'\n'))
           sha=hashlib.sha256((o/'main.cpp').read_bytes()).hexdigest();print('V482SourceSHA256='+sha.upper())
-          if sha!='685f04af1baa4c6addfb8d094a0e87f14ff38a48b9faa20474ee58c5d97f2f60': raise SystemExit('v482 sha mismatch')
+          if sha!='6e857a8a6ccd570d34348dd265ea63e57fe9d3240d9a05447b39a3794fe1cabb': raise SystemExit('v482 sha mismatch')
           '@ | python -
           if($LASTEXITCODE){throw 'source reconstruction failed'}
       - name: Preservation audit
@@ -73,7 +74,8 @@ jobs:
           for x in ["InterruptibleAttackDelay(a.wDelayMs)","ReferenceTapKey('W')","InterruptibleAttackDelay(a.sDelayMs)","ReferenceTapKey('S')"]:
             if x not in ws:raise SystemExit('missing deterministic WS '+x)
           if 'int wDelayMs=75;' not in b or 'int sDelayMs=50;' not in b:raise SystemExit('WS defaults missing')
-          if '36000,4000' not in b or '42000,4000' not in b or '80000' not in b:raise SystemExit('frame-visible cure timing missing')
+          if '45000,4000' not in b or '48000,4000' not in b or '90000' not in b:raise SystemExit('frame-visible cure timing missing')
+          if 'ObserverNowUs' not in b:raise SystemExit('high-resolution observer missing')
           delay=fn(b,'void InterruptibleAttackDelay')
           if 'QueryPerformanceCounter' not in delay or 'const LONGLONG end=' not in delay or 'left-=q' in delay:raise SystemExit('deadline based attack timing missing')
           print('CoreScanCodeFIFO=PASS');print('ExistingStructurePreserved=PASS');print('ChatInjectedEnterRecoveryModel=PASS');print('DeterministicWSModel=PASS');print('CureFrameVisibleModel=PASS')
@@ -150,7 +152,7 @@ jobs:
           @"
           Product=PremiumPlusCombo
           Version=4.8.2.0
-          SourceSHA256=685F04AF1BAA4C6ADDFB8D094A0E87F14FF38A48B9FAA20474EE58C5D97F2F60
+          SourceSHA256=6E857A8A6CCD570D34348DD265EA63E57FE9D3240D9A05447B39A3794FE1CABB
           ReferenceV47SourceSHA256=E2598A67B26CB0EFB4AEA05AC4C329D9F4098FCDEF645F2E6EF0D5A3CA0F1F07
           ExistingUIAndRogueStructurePreserved=PASS
           FIFOScanCodeTransportPreserved=PASS
