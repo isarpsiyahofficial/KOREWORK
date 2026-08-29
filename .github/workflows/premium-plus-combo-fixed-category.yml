@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
         with: {arch: x64}
-      - name: Reconstruct exact source
+      - name: Reconstruct exact source and resources
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'; New-Item -ItemType Directory -Force premium_plus_combo_final/final-build | Out-Null
@@ -37,8 +37,8 @@ jobs:
           @'
           #include <windows.h>
           1 VERSIONINFO
-           FILEVERSION 4,3,0,0
-           PRODUCTVERSION 4,3,0,0
+           FILEVERSION 4,3,1,0
+           PRODUCTVERSION 4,3,1,0
            FILEFLAGSMASK 0x3fL
            FILEFLAGS 0
            FILEOS 0x40004L
@@ -49,9 +49,9 @@ jobs:
             BLOCK "041F04E6"
             BEGIN
              VALUE "FileDescription", "Premium Plus Combo - Rogue / Attack\0"
-             VALUE "FileVersion", "4.3.0.0\0"
+             VALUE "FileVersion", "4.3.1.0\0"
              VALUE "ProductName", "Premium Plus Combo\0"
-             VALUE "ProductVersion", "4.3.0.0\0"
+             VALUE "ProductVersion", "4.3.1.0\0"
             END
            END
            BLOCK "VarFileInfo"
@@ -60,15 +60,39 @@ jobs:
            END
           END
           '@ | Set-Content premium_plus_combo_final/final-build/app.rc -Encoding Ascii
-      - name: Build test and elevated final x64 EXEs
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="1.0.0.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"/>
+            <description>Premium Plus Combo - Rogue</description>
+            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+              <security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security>
+            </trustInfo>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3">
+              <windowsSettings>
+                <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+                <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+              </windowsSettings>
+            </application>
+            <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+              <application>
+                <supportedOS Id="{4f476546-937f-4a47-9aa8-1d328b35c7ad}"/>
+                <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+              </application>
+            </compatibility>
+          </assembly>
+          '@ | Set-Content premium_plus_combo_final/final-build/final.manifest -Encoding UTF8
+      - name: Build test and final x64 EXEs
         shell: pwsh
         working-directory: premium_plus_combo_final/final-build
         run: |
           rc /nologo app.rc; if($LASTEXITCODE){throw 'rc failed'}
           cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo-Test.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
           if($LASTEXITCODE){throw 'test cl failed'}
-          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='requireAdministrator' uiAccess='false'"
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
           if($LASTEXITCODE){throw 'final cl failed'}
+          mt.exe -manifest final.manifest "-outputresource:PremiumPlusCombo.exe;#1"
+          if($LASTEXITCODE){throw 'manifest embed failed'}
       - name: Behavior tests from identical source
         shell: pwsh
         working-directory: premium_plus_combo_final/final-build
@@ -77,15 +101,15 @@ jobs:
           $r=Get-Content self-test-report.txt -Raw
           if($r -notmatch 'TOTAL=138' -or $r -notmatch 'PASSED=138' -or $r -match '=FAIL'){Get-Content self-test-report.txt;throw 'self-test failed'}
           foreach($n in @('BridgeAllKeyboardRouting=PASS','MinorReferenceSequenceModel=PASS','AttackPerSkillBarSlotSequence=PASS','SkillBarF1ToF12Mapping=PASS','NonCapsHotkeyMapping=PASS','CureSequenceF2_6_F1=PASS')){if($r -notmatch [regex]::Escape($n)){throw "missing $n"}}
-      - name: Verify final manifest and PE
+      - name: Verify exact final manifest and PE
         shell: pwsh
         working-directory: premium_plus_combo_final/final-build
         run: |
           mt.exe "-inputresource:PremiumPlusCombo.exe;#1" -out:embedded.manifest
           if($LASTEXITCODE){throw 'manifest extraction failed'}
           $m=Get-Content embedded.manifest -Raw
-          if($m -notmatch 'requireAdministrator'){throw 'final manifest is not requireAdministrator'}
-          if($m -match 'level=.asInvoker'){throw 'asInvoker leaked into final manifest'}
+          foreach($must in @('requireAdministrator','PerMonitorV2','true/pm','processorArchitecture="amd64"')){if($m -notmatch [regex]::Escape($must)){throw "manifest missing $must"}}
+          if($m -match 'level="asInvoker"'){throw 'asInvoker leaked into final manifest'}
           dumpbin /headers PremiumPlusCombo.exe | Set-Content headers.txt; dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
           $h=Get-Content headers.txt -Raw;$i=Get-Content imports.txt -Raw
           if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
@@ -104,11 +128,11 @@ jobs:
           $sha=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash;$size=(Get-Item PremiumPlusCombo.exe).Length
           @"
           Product=PremiumPlusCombo
-          Version=4.3.0.0
+          Version=4.3.1.0
           ReferenceWorkingMinorSHA256=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856
           SourceSHA256=2DB77520FF86E6126216A52BBDA9BB06A0B9A5AC31776895CD99B29BEF9C978A
           Manifest=requireAdministrator
-          ReferenceManifest=requireAdministrator
+          DpiAwareness=PerMonitorV2
           MinorInput=EXACT_062F_BATCH_6_EVENTS_QPC_120_240
           BridgeCommitOrder=EVENT_DATA_THEN_EVENT_SEQUENCE_THEN_WRITE_SEQUENCE
           InputMarker=PPCOMBO_EXACT_062F
@@ -128,6 +152,7 @@ jobs:
           path: |
             premium_plus_combo_final/final-build/PremiumPlusCombo.exe
             premium_plus_combo_final/final-build/main.cpp
+            premium_plus_combo_final/final-build/final.manifest
             premium_plus_combo_final/final-build/embedded.manifest
             premium_plus_combo_final/final-build/BUILD-INFO.txt
             premium_plus_combo_final/final-build/self-test-report.txt
