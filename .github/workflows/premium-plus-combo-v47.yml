@@ -1,0 +1,259 @@
+name: PremiumPlusCombo v4.7 Cure Attack Vitals WS
+on:
+  workflow_dispatch:
+  push:
+    branches: [premium-plus-combo-cure-attack-vitals-ws]
+    paths:
+      - 'premium_plus_combo_final/source/vnext_47/**'
+      - '.github/workflows/premium-plus-combo-v47.yml'
+permissions:
+  contents: read
+jobs:
+  validate-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Reconstruct exact v4.6 reference and v4.7 source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force premium_plus_combo_final/v47-build | Out-Null
+          @'
+          import base64,gzip,pathlib,hashlib
+          r=pathlib.Path('premium_plus_combo_final');o=r/'v47-build'
+          p=sorted((r/'source'/'vnext_46').glob('c*.txt'))
+          if len(p)!=8: raise SystemExit('expected 8 v4.6 chunks')
+          old=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in p)))
+          if hashlib.sha256(old).hexdigest()!='9a672664e72b09d820fe98b51b0f277bb4c0a267b6b7ad0e5bd7937e9e4837e9': raise SystemExit('v4.6 reference SHA mismatch')
+          (o/'reference-v46.cpp').write_bytes(old)
+          q=sorted((r/'source'/'vnext_47').glob('c*.txt'))
+          if len(q)!=4: raise SystemExit('expected 4 v4.7 chunks')
+          raw=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in q)))
+          sha=hashlib.sha256(raw).hexdigest()
+          print('V47SourceSHA256='+sha.upper())
+          if sha!='e2598a67b26cb0efb4aea05ac4c329d9f4098fcdef645f2e6ef0d5a3ca0f1f07': raise SystemExit('v4.7 source SHA mismatch')
+          (o/'main.cpp').write_bytes(raw)
+          '@ | python -
+          if($LASTEXITCODE){throw 'source reconstruction failed'}
+
+      - name: Preserve verified working structure and audit requested changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          from pathlib import Path
+          old=Path('premium_plus_combo_final/v47-build/reference-v46.cpp').read_text(encoding='utf-8')
+          new=Path('premium_plus_combo_final/v47-build/main.cpp').read_text(encoding='utf-8')
+          def block(s,a,b): return s[s.index(a):s.index(b,s.index(a))]
+          checks=[
+            ('RogueSettings','struct RogueSettings {','struct AttackSettings {'),
+            ('BridgeAndScanCodeFIFO','bool InitBridge(){','void SendRoutedKey('),
+            ('MinorWorker','void MinorWorker(){','void RWorker(){'),
+            ('RWorker','void RWorker(){','void CureWorker(){'),
+            ('RogueUiReader','void ReadRogueUi(','void ReadAttackUi('),
+            ('RoguePage','void CreateRoguePage(){','void CreateAttackPage(){'),
+            ('ChromeLayout','void LayoutChrome(){','LRESULT CALLBACK WndProc('),
+          ]
+          for name,a,b in checks:
+              if block(old,a,b)!=block(new,a,b): raise SystemExit(name+' changed unexpectedly')
+              print(name+'=PASS')
+          required={
+            'WMsRegistry':'L"WMs"','SMsRegistry':'L"SMs"',
+            'WMsControl':'IDC_ATTACK_W_MS','SMsControl':'IDC_ATTACK_S_MS',
+            'PersistentWS':'g_wsTurn.fetch_add(1',
+            'NumericReadout':'ReadNumericOverlay','NumericCurrent':'g_hpCurrent','NumericMax':'g_hpMax',
+            'CureSingleFlight':'g_cureExclusive.compare_exchange_strong(expected,true)',
+            'CureSwallow':'if(r.cureEnabled&&vk==r.cureHotkey)',
+            'CureFastBarGap':'PreciseDelayUs(4000)','CureFastRestoreGap':'PreciseDelayUs(18000)',
+            'NoRedundantBar':'wantedBar!=currentBar','FastAttackWorker':'if(a.delayMs<=2)PreciseDelayUs(a.delayMs*1000)',
+            'SmallFont':'g_font=CreateFontW(-15','SmallBold':'g_fontBold=CreateFontW(-16','SmallUi':'g_fontSmall=CreateFontW(-13',
+            'ScanCode':'KEYEVENTF_SCANCODE','QPC':'QueryPerformanceCounter','FIFO':'FifoTicketLock g_gameInputGate'
+          }
+          for name,x in required.items():
+              if x not in new: raise SystemExit('missing '+name)
+              print(name+'=PASS')
+          if 'ReferenceTapKeyUnlocked(BarToVk(a.attackBars[i]));Sleep(12);' in new: raise SystemExit('old fixed 12ms attack delay remains')
+          if 'return CallNextHookEx(g_keyboardHook,code,wp,lp);}}}}return CallNextHookEx' in new[new.find('if(r.cureEnabled&&vk==r.cureHotkey)'):new.find('if(r.cureEnabled&&vk==r.cureHotkey)')+500]: raise SystemExit('cure hotkey still passes through')
+          print('PreservationAndFeatureAudit=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'preservation audit failed'}
+
+      - name: Create resources and manifest
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v47-build
+        run: |
+          @'
+          #include <windows.h>
+          1 VERSIONINFO
+           FILEVERSION 4,7,0,0
+           PRODUCTVERSION 4,7,0,0
+           FILEFLAGSMASK 0x3fL
+           FILEFLAGS 0
+           FILEOS 0x40004L
+           FILETYPE 0x1L
+          BEGIN
+           BLOCK "StringFileInfo"
+           BEGIN
+            BLOCK "041F04E6"
+            BEGIN
+             VALUE "FileDescription", "Premium Plus Combo - Rogue / Attack\0"
+             VALUE "FileVersion", "4.7.0.0\0"
+             VALUE "ProductName", "Premium Plus Combo\0"
+             VALUE "ProductVersion", "4.7.0.0\0"
+            END
+           END
+           BLOCK "VarFileInfo"
+           BEGIN
+            VALUE "Translation", 0x041F, 1254
+           END
+          END
+          '@ | Set-Content app.rc -Encoding Ascii
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="1.0.0.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"/>
+            <description>Premium Plus Combo - Rogue</description>
+            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security></trustInfo>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content final.manifest -Encoding UTF8
+
+      - name: Build native Windows x64
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v47-build
+        run: |
+          rc /nologo app.rc
+          if($LASTEXITCODE){throw 'rc failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo-Test.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+          if($LASTEXITCODE){throw 'test build failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'final build failed'}
+          mt.exe -manifest final.manifest "-outputresource:PremiumPlusCombo.exe;#1"
+          if($LASTEXITCODE){throw 'manifest embed failed'}
+
+      - name: Logic self test
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v47-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode){if(Test-Path self-test-report.txt){Get-Content self-test-report.txt};throw "self-test exit $($p.ExitCode)"}
+          $r=Get-Content self-test-report.txt -Raw
+          foreach($n in @('TOTAL=156','PASSED=156','AttackWSAlternation=PASS','AttackLoopAllows1ms=PASS','SkillDelayAllows1ms=PASS','WDelayAllows1ms=PASS','SDelayAllows1ms=PASS','CureSingleFlightModel=PASS','TypedHP_20=PASS','TypedHP_100=PASS','TypedMP_20=PASS','TypedMP_100=PASS','MinorReferenceSequenceModel=PASS','ScanCodeTransport=PASS')){if($r -notmatch [regex]::Escape($n)){Get-Content self-test-report.txt;throw "missing $n"}}
+          if($r -match '=FAIL'){Get-Content self-test-report.txt;throw 'self-test contains failure'}
+          Get-Content self-test-report.txt
+
+      - name: FIFO scan-code transport regression
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v47-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--transport-observer-test' -Wait -PassThru
+          if($p.ExitCode){Get-Content transport-observer-report.txt;throw 'transport observer failed'}
+          $r=Get-Content transport-observer-report.txt -Raw
+          foreach($n in @('8_Down=24','9_Down=24','0_Down=24','R_Down=24','ScanCodesNonZero=PASS','Overlap=0','RESULT=PASS')){if($r -notmatch [regex]::Escape($n)){throw "transport missing $n"}}
+          Get-Content transport-observer-report.txt
+
+      - name: Attack 4-skill W-S regression
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v47-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--attack-observer-test' -Wait -PassThru
+          if($p.ExitCode){Get-Content attack-observer-report.txt;throw 'attack observer failed'}
+          $r=Get-Content attack-observer-report.txt -Raw
+          foreach($n in @('Z_Down=1','W_Down=2','S_Down=2','Skill2_Down=1','Skill3_Down=1','Skill4_Down=1','Skill5_Down=1','ScanCodesNonZero=PASS','Overlap=0','RESULT=PASS')){if($r -notmatch [regex]::Escape($n)){throw "attack missing $n"}}
+          Get-Content attack-observer-report.txt
+
+      - name: Cure single-trigger regression
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v47-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--cure-observer-test' -Wait -PassThru
+          if($p.ExitCode){Get-Content cure-observer-report.txt;throw 'cure observer failed'}
+          $r=Get-Content cure-observer-report.txt -Raw
+          foreach($n in @('F2_Down=1','6_Down=1','F1_Down=1','ScanCodesNonZero=PASS','Overlap=0','RESULT=PASS')){if($r -notmatch [regex]::Escape($n)){throw "cure missing $n"}}
+          if($r -notmatch 'LatencyMs=(\d+)'){throw 'cure latency missing'}
+          if([int]$Matches[1] -ge 150){throw "cure latency too high $($Matches[1])ms"}
+          Get-Content cure-observer-report.txt
+
+      - name: UI source coverage PE hardening and Defender
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v47-build
+        run: |
+          $src=Get-Content main.cpp -Raw
+          foreach($n in @('IDC_ATTACK_W_MS','IDC_ATTACK_S_MS','L"Kalibre Et"','g_ui.hpPercent=Label','g_ui.mpPercent=Label','g_font=CreateFontW(-15','g_fontBold=CreateFontW(-16','g_fontSmall=CreateFontW(-13')){if($src -notmatch [regex]::Escape($n)){throw "UI gate missing $n"}}
+          mt.exe "-inputresource:PremiumPlusCombo.exe;#1" -out:embedded.manifest
+          if($LASTEXITCODE){throw 'manifest extract failed'}
+          dumpbin /headers PremiumPlusCombo.exe | Set-Content headers.txt
+          dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
+          $h=Get-Content headers.txt -Raw;$i=Get-Content imports.txt -Raw
+          if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
+          if($h -match 'E0000060'){throw 'RWX section found'}
+          foreach($b in @('WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll')){if($i -match [regex]::Escape($b)){throw "unexpected import $b"}}
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(-not(Test-Path $mp)){$mp=Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform" -Directory|Sort-Object Name -Descending|%{Join-Path $_.FullName 'MpCmdRun.exe'}|?{Test-Path $_}|Select-Object -First 1}
+          if(-not $mp){throw 'Defender unavailable'}
+          & $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo.exe) -DisableRemediation
+          if($LASTEXITCODE){throw "Defender exit $LASTEXITCODE"}
+          'DefenderScan=PASS'|Set-Content defender-scan.txt
+
+      - name: Final report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v47-build
+        run: |
+          $exe=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash
+          $src=(Get-FileHash main.cpp -Algorithm SHA256).Hash
+          $size=(Get-Item PremiumPlusCombo.exe).Length
+          $lat=(Get-Content cure-observer-report.txt|?{$_ -like 'LatencyMs=*'})
+          @"
+          Product=PremiumPlusCombo
+          Version=4.7.0.0
+          SourceSHA256=$src
+          ReferenceV46SourceSHA256=9A672664E72B09D820FE98B51B0F277BB4C0A267B6B7AD0E5BD7937E9E4837E9
+          WorkingStructurePreservation=PASS
+          RogueSettingsPreserved=PASS
+          RoguePagePreserved=PASS
+          MinorWorkerPreserved=PASS
+          RWorkerPreserved=PASS
+          FIFOScanCodeTransportPreserved=PASS
+          HPMPPercent=PASS
+          HPMPNumericOverlayReader=PASS
+          WSeparateMs=PASS
+          SSeparateMs=PASS
+          PersistentWSAlternation=PASS
+          CureSingleFlight=PASS
+          $lat
+          AttackFixed12msRemoved=PASS
+          AttackRedundantBarSwitchRemoved=PASS
+          AttackLoopHighResolution=PASS
+          SmallerResponsiveUiSource=PASS
+          SelfTest=156/156 PASS
+          TransportObserver=PASS
+          AttackObserver=PASS
+          CureObserver=PASS
+          Overlap=0
+          DefenderScan=PASS
+          EXESHA256=$exe
+          Size=$size
+          RealGameVerification=USER_SIDE_REQUIRED
+          "@ | Set-Content BUILD-INFO.txt
+          Get-Content BUILD-INFO.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-v4.7-CURE-ATTACK-VITALS-WS-TESTED
+          path: |
+            premium_plus_combo_final/v47-build/PremiumPlusCombo.exe
+            premium_plus_combo_final/v47-build/main.cpp
+            premium_plus_combo_final/v47-build/BUILD-INFO.txt
+            premium_plus_combo_final/v47-build/self-test-report.txt
+            premium_plus_combo_final/v47-build/transport-observer-report.txt
+            premium_plus_combo_final/v47-build/attack-observer-report.txt
+            premium_plus_combo_final/v47-build/cure-observer-report.txt
+            premium_plus_combo_final/v47-build/defender-scan.txt
+            premium_plus_combo_final/v47-build/embedded.manifest
+            premium_plus_combo_final/v47-build/imports.txt
+            premium_plus_combo_final/v47-build/headers.txt
+          retention-days: 14
