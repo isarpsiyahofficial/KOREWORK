@@ -5,6 +5,7 @@ on:
     branches: [premium-plus-combo-cure-attack-vitals-ws]
     paths:
       - 'premium_plus_combo_final/source/vnext_48/v481_to_v482.patch.gz.b64'
+      - 'premium_plus_combo_final/source/vnext_48/v482_to_v4821.patch.gz.b64'
       - '.github/workflows/premium-plus-combo-v482-final.yml'
 permissions:
   contents: read
@@ -29,13 +30,13 @@ jobs:
           old=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in ps)))
           if hashlib.sha256(old).hexdigest()!='e2598a67b26cb0efb4aea05ac4c329d9f4098fcdef645f2e6ef0d5a3ca0f1f07': raise SystemExit('v47 sha mismatch')
           (o/'reference-v47.cpp').write_bytes(old);(o/'main.cpp').write_bytes(old)
-          for name,strip in [('v47_to_v48.patch.gz.b64',0),('v48_observer_fix2.patch.gz.b64',0),('v481_to_v482.patch.gz.b64',1)]:
+          for name,strip in [('v47_to_v48.patch.gz.b64',0),('v48_observer_fix2.patch.gz.b64',0),('v481_to_v482.patch.gz.b64',1),('v482_to_v4821.patch.gz.b64',1)]:
               raw=gzip.decompress(base64.b64decode((r/'source'/'vnext_48'/name).read_text().strip()))
               patch=o/(name+'.patch');patch.write_bytes(raw)
               subprocess.run(['git','apply',f'-p{strip}',patch.name],cwd=o,check=True)
               p=o/'main.cpp';p.write_bytes(p.read_bytes().replace(b'\r\n',b'\n'))
           sha=hashlib.sha256((o/'main.cpp').read_bytes()).hexdigest();print('V482SourceSHA256='+sha.upper())
-          if sha!='4adb36530c2fbb0a16aee71d6a750b13812786ac8252992c7b7c7949c64f7b73': raise SystemExit('v482 sha mismatch')
+          if sha!='685f04af1baa4c6addfb8d094a0e87f14ff38a48b9faa20474ee58c5d97f2f60': raise SystemExit('v482 sha mismatch')
           '@ | python -
           if($LASTEXITCODE){throw 'source reconstruction failed'}
       - name: Preservation audit
@@ -58,20 +59,23 @@ jobs:
             print(n+'=PASS')
           for m in ['UINT ReferenceSendInputsUnlocked','UINT ReferenceSendInputs(','bool ReferenceTapKeyUnlocked','bool ReferenceTapKey(']:
             if fn(a,m)!=fn(b,m):raise SystemExit('core input transport changed '+m)
-          req=['g_potionExclusive','g_chatMode','g_gameWindow','g_skillTurn','DirectTimedTapUnlocked','NextEnabledSkill','MaybeSendWsCombo','PotionRetryIntervalModel','ChatPauseModel','ChatInjectedEnterCloses','WSDefaults_75_50','FrameVisibleHold','WSEveryShot','WSTiming']
+          req=['g_potionExclusive','g_chatMode','g_gameWindow','g_skillTurn','DirectTimedTapUnlocked','NextEnabledSkill','MaybeSendWsCombo','PotionRetryIntervalModel','ChatPauseModel','ChatInjectedEnterCloses','ChatCloseSurvivesFocusLoss','WSDefaults_75_50','FrameVisibleHold','WSEveryShot','WSTiming']
           for x in req:
             if x not in b:raise SystemExit('missing '+x)
           if 'BuildMinorBatch(fresh,burst)' in b:raise SystemExit('minor catch-up burst remains')
           if 'for(int i=0;i<4;i++){if(!a.skillEnabled[i])continue;' in b:raise SystemExit('old multi-skill dump remains')
-          chat=b.index('if((vk==VK_RETURN||(vk==VK_ESCAPE&&g_chatMode.load()))&&gameFg)')
+          chat=b.index('if(g_chatMode.load()&&(vk==VK_RETURN||vk==VK_ESCAPE))')
           reject=b.index('if(!r.powerEnabled||injected)',chat)
-          if chat>reject:raise SystemExit('chat injected enter handled too late')
+          if chat>reject:raise SystemExit('chat close handled too late')
+          if 'if(vk==VK_RETURN&&gameFg){g_chatMode=true;' not in b:raise SystemExit('chat open gate missing')
           ws=fn(b,'void MaybeSendWsCombo')
           if 'g_wsTurn' in ws or 'now-last' in ws:raise SystemExit('old alternating/cadence WS logic remains')
           for x in ["InterruptibleAttackDelay(a.wDelayMs)","ReferenceTapKey('W')","InterruptibleAttackDelay(a.sDelayMs)","ReferenceTapKey('S')"]:
             if x not in ws:raise SystemExit('missing deterministic WS '+x)
           if 'int wDelayMs=75;' not in b or 'int sDelayMs=50;' not in b:raise SystemExit('WS defaults missing')
-          if '18000,3000' not in b or '26000,3000' not in b or '65000' not in b:raise SystemExit('frame-visible cure timing missing')
+          if '36000,4000' not in b or '42000,4000' not in b or '80000' not in b:raise SystemExit('frame-visible cure timing missing')
+          delay=fn(b,'void InterruptibleAttackDelay')
+          if 'QueryPerformanceCounter' not in delay or 'const LONGLONG end=' not in delay or 'left-=q' in delay:raise SystemExit('deadline based attack timing missing')
           print('CoreScanCodeFIFO=PASS');print('ExistingStructurePreserved=PASS');print('ChatInjectedEnterRecoveryModel=PASS');print('DeterministicWSModel=PASS');print('CureFrameVisibleModel=PASS')
           '@ | python -
           if($LASTEXITCODE){throw 'preservation audit failed'}
@@ -110,7 +114,7 @@ jobs:
         run: |
           $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--self-test' -Wait -PassThru;if($p.ExitCode){Get-Content self-test-report.txt;throw 'self-test failed'}
           $r=Get-Content self-test-report.txt -Raw
-          foreach($x in @('TOTAL=168','PASSED=168','AttackRoundRobin=PASS','WSDefaults_75_50=PASS','PotionRetryIntervalModel=PASS','ChatPauseModel=PASS','ChatEnterOpens=PASS','ChatInjectedEnterCloses=PASS','ChatEscapeCloses=PASS','GameGlyph4=PASS','GameGlyph2=PASS','GameGlyph6=PASS','GameGlyph9=PASS','GameGlyph8=PASS','GameGlyphSlash=PASS','MinorReferenceSequenceModel=PASS','ScanCodeTransport=PASS')){if($r -notmatch [regex]::Escape($x)){throw "missing $x"}}
+          foreach($x in @('TOTAL=169','PASSED=169','AttackRoundRobin=PASS','WSDefaults_75_50=PASS','PotionRetryIntervalModel=PASS','ChatPauseModel=PASS','ChatEnterOpens=PASS','ChatInjectedEnterCloses=PASS','ChatCloseSurvivesFocusLoss=PASS','ChatEscapeCloses=PASS','GameGlyph4=PASS','GameGlyph2=PASS','GameGlyph6=PASS','GameGlyph9=PASS','GameGlyph8=PASS','GameGlyphSlash=PASS','MinorReferenceSequenceModel=PASS','ScanCodeTransport=PASS')){if($r -notmatch [regex]::Escape($x)){throw "missing $x"}}
           if($r -match '=FAIL'){throw 'self-test reports failure'}
           Get-Content self-test-report.txt
       - name: Transport observer
@@ -146,7 +150,7 @@ jobs:
           @"
           Product=PremiumPlusCombo
           Version=4.8.2.0
-          SourceSHA256=4ADB36530C2FBB0A16AEE71D6A750B13812786AC8252992C7B7C7949C64F7B73
+          SourceSHA256=685F04AF1BAA4C6ADDFB8D094A0E87F14FF38A48B9FAA20474EE58C5D97F2F60
           ReferenceV47SourceSHA256=E2598A67B26CB0EFB4AEA05AC4C329D9F4098FCDEF645F2E6EF0D5A3CA0F1F07
           ExistingUIAndRogueStructurePreserved=PASS
           FIFOScanCodeTransportPreserved=PASS
@@ -161,7 +165,7 @@ jobs:
           CureSinglePressFrameVisible=PASS
           $holds
           $lat
-          SelfTest=168/168 PASS
+          SelfTest=169/169 PASS
           TransportObserver=PASS
           AttackObserver=PASS
           CureObserver=PASS
