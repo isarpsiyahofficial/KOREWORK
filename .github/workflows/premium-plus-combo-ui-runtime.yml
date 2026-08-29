@@ -1,0 +1,141 @@
+name: PremiumPlusCombo Runtime UI Check
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'premium_plus_combo_final/source/fixed_parts/**'
+      - '.github/workflows/premium-plus-combo-ui-runtime.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ui-check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Reconstruct exact fixed source and build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $src='premium_plus_combo_final/source'; $work='premium_plus_combo_final/ui-build'
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          @'
+          import base64,gzip,pathlib
+          s=pathlib.Path('premium_plus_combo_final/source'); o=pathlib.Path('premium_plus_combo_final/ui-build')
+          ps=sorted((s/'fixed_parts').glob('part*.txt'))
+          if len(ps)!=6: raise SystemExit('fixed chunk count mismatch')
+          o.joinpath('main.cpp').write_bytes(gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in ps))))
+          o.joinpath('left.jpg').write_bytes(base64.b64decode(s.joinpath('left.jpg.b64').read_text().strip()))
+          o.joinpath('right.jpg').write_bytes(base64.b64decode(s.joinpath('right.jpg.b64').read_text().strip()))
+          '@ | python -
+          $sha=(Get-FileHash "$work/main.cpp" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -ne '49711f457bb9d4c37426cc7ef8bc713bbeefb9e494aee88898a625b3788b2245'){throw "source SHA mismatch $sha"}
+          @'
+          #include <windows.h>
+          201 RCDATA "left.jpg"
+          202 RCDATA "right.jpg"
+          '@ | Set-Content "$work/app.rc" -Encoding Ascii
+          Push-Location $work
+          rc /nologo app.rc; if($LASTEXITCODE -ne 0){throw 'rc failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib gdiplus.lib advapi32.lib ole32.lib winmm.lib shell32.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+          if($LASTEXITCODE -ne 0){throw 'cl failed'}
+          Pop-Location
+
+      - name: Launch and validate ROGUE ATTACK categories
+        shell: pwsh
+        working-directory: premium_plus_combo_final/ui-build
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class U {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
+            [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string c,string t);
+            [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h,int id);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out RECT r);
+            [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,System.Text.StringBuilder s,int n);
+            [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
+          }
+          '@
+          $p=Start-Process .\PremiumPlusCombo.exe -PassThru
+          try {
+            $hw=[IntPtr]::Zero
+            for($i=0;$i -lt 40 -and $hw -eq [IntPtr]::Zero;$i++){ Start-Sleep -Milliseconds 100; $hw=[U]::FindWindow($null,'Premium Plus Combo - Rogue') }
+            if($hw -eq [IntPtr]::Zero){throw 'main window not found'}
+            $r=New-Object U+RECT; [void][U]::GetWindowRect($hw,[ref]$r)
+            $w=$r.R-$r.L; $h=$r.B-$r.T
+            if($w -lt 790 -or $w -gt 840){throw "unexpected outer window width $w"}
+            if($h -lt 620 -or $h -gt 700){throw "unexpected outer window height $h"}
+
+            $rogue=[U]::GetDlgItem($hw,1520); $attack=[U]::GetDlgItem($hw,1521)
+            $rcombo=[U]::GetDlgItem($hw,1420); $cure=[U]::GetDlgItem($hw,1421); $attackActive=[U]::GetDlgItem($hw,1500)
+            foreach($pair in @(@('ROGUE',$rogue),@('ATTACK',$attack),@('RCombo',$rcombo),@('Cure',$cure),@('AttackActive',$attackActive))){if($pair[1] -eq [IntPtr]::Zero){throw "missing control $($pair[0])"}}
+            if(-not [U]::IsWindowVisible($rcombo) -or -not [U]::IsWindowVisible($cure)){throw 'ROGUE page not visible by default'}
+            if([U]::IsWindowVisible($attackActive)){throw 'ATTACK page leaked into default ROGUE category'}
+
+            [void][U]::SendMessage($attack,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)
+            Start-Sleep -Milliseconds 250
+            if([U]::IsWindowVisible($rcombo) -or [U]::IsWindowVisible($cure)){throw 'ROGUE controls still visible after ATTACK click'}
+            if(-not [U]::IsWindowVisible($attackActive)){throw 'ATTACK controls not visible after ATTACK click'}
+
+            [void][U]::SendMessage($rogue,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)
+            Start-Sleep -Milliseconds 250
+            if(-not [U]::IsWindowVisible($rcombo) -or [U]::IsWindowVisible($attackActive)){throw 'ROGUE category did not restore correctly'}
+            "WindowOuter=${w}x${h}`nDefaultRogue=PASS`nAttackSwitch=PASS`nRogueRestore=PASS" | Set-Content ui-runtime.txt
+          } finally {
+            if($p -and -not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
+          }
+          Get-Content ui-runtime.txt
+
+      - name: Capture window screenshot
+        shell: pwsh
+        working-directory: premium_plus_combo_final/ui-build
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @'
+          using System; using System.Runtime.InteropServices;
+          public static class S {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
+            [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string c,string t);
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out RECT r);
+            [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
+            [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h,int id);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+          }
+          '@
+          $p=Start-Process .\PremiumPlusCombo.exe -PassThru
+          try {
+            $hw=[IntPtr]::Zero
+            for($i=0;$i -lt 40 -and $hw -eq [IntPtr]::Zero;$i++){Start-Sleep -Milliseconds 100;$hw=[S]::FindWindow($null,'Premium Plus Combo - Rogue')}
+            if($hw -eq [IntPtr]::Zero){throw 'window missing for screenshot'}
+            [void][S]::SetForegroundWindow($hw); Start-Sleep -Milliseconds 300
+            $r=New-Object S+RECT; [void][S]::GetWindowRect($hw,[ref]$r)
+            $bmp=New-Object Drawing.Bitmap ($r.R-$r.L),($r.B-$r.T)
+            $g=[Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($r.L,$r.T,0,0,$bmp.Size)
+            $bmp.Save((Join-Path (Get-Location) 'rogue-page.png'),[Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose();$bmp.Dispose()
+            $attack=[S]::GetDlgItem($hw,1521);[void][S]::SendMessage($attack,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero);Start-Sleep -Milliseconds 300
+            $bmp=New-Object Drawing.Bitmap ($r.R-$r.L),($r.B-$r.T);$g=[Drawing.Graphics]::FromImage($bmp);$g.CopyFromScreen($r.L,$r.T,0,0,$bmp.Size);$bmp.Save((Join-Path (Get-Location) 'attack-page.png'),[Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$bmp.Dispose()
+          } finally {if($p -and -not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}}
+
+      - name: Upload runtime UI evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-UI-RUNTIME-EVIDENCE
+          path: |
+            premium_plus_combo_final/ui-build/ui-runtime.txt
+            premium_plus_combo_final/ui-build/rogue-page.png
+            premium_plus_combo_final/ui-build/attack-page.png
+          if-no-files-found: error
+          retention-days: 14
