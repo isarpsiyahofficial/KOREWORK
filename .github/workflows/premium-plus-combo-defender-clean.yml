@@ -1,0 +1,131 @@
+name: PremiumPlusCombo Defender Clean
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-defender-clean:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact EXE and verify PE invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          import base64, hashlib, lzma, pathlib, struct
+
+          root = pathlib.Path('premium_plus_combo_defender_clean')
+          parts = sorted(root.glob('xz7_part*.txt'))
+          if len(parts) != 7:
+              raise SystemExit(f'expected 7 chunks, got {len(parts)}')
+          packed = base64.b64decode(''.join(p.read_text().strip() for p in parts))
+          data = lzma.decompress(packed)
+          out = pathlib.Path('PremiumPlusCombo-FINAL-062F-CLEAN.exe')
+          out.write_bytes(data)
+
+          expected = '3A37F66A1A7AC57463FE3227BFD86E52EBD45068C1A6D5642F19CC009A932E1C'
+          sha = hashlib.sha256(data).hexdigest().upper()
+          if sha != expected:
+              raise SystemExit(f'SHA mismatch {sha}')
+          if len(data) != 245760:
+              raise SystemExit(f'unexpected size {len(data)}')
+
+          def u16(o): return struct.unpack_from('<H', data, o)[0]
+          def u32(o): return struct.unpack_from('<I', data, o)[0]
+          pe = u32(0x3c)
+          if data[pe:pe+4] != b'PE\0\0': raise SystemExit('bad PE')
+          machine = u16(pe+4)
+          nsec = u16(pe+6)
+          optsz = u16(pe+20)
+          opt = pe+24
+          magic = u16(opt)
+          ep = u32(opt+16)
+          if machine != 0x8664 or magic != 0x20b: raise SystemExit('not PE32+ x64')
+          if nsec != 9: raise SystemExit(f'expected 9 sections, got {nsec}')
+          if ep != 0xD810: raise SystemExit(f'entrypoint changed: 0x{ep:X}')
+          st = opt + optsz
+          sections = []
+          for i in range(nsec):
+              o = st + i*40
+              name = data[o:o+8].rstrip(b'\0').decode('ascii')
+              ch = u32(o+36)
+              sections.append((name,ch))
+              writable = bool(ch & 0x80000000)
+              executable = bool(ch & 0x20000000)
+              if writable and executable:
+                  raise SystemExit(f'RWX section forbidden: {name} 0x{ch:08X}')
+          d = dict(sections)
+          if d.get('.atkcode') != 0x60000020: raise SystemExit(f'bad .atkcode flags {d.get(".atkcode")}')
+          if d.get('.atkdata') != 0xC0000040: raise SystemExit(f'bad .atkdata flags {d.get(".atkdata")}')
+
+          forbidden = [b'CreateProcess', b'ShellExecute', b'WinExec', b'WINHTTP.dll', b'WININET.dll', b'WS2_32.dll', b'cmd.exe', b'powershell.exe', b'http://', b'https://']
+          for token in forbidden:
+              if token.lower() in data.lower():
+                  raise SystemExit(f'forbidden token in binary: {token!r}')
+
+          report = [
+              f'SHA256={sha}', f'Size={len(data)}', f'EntryPointRVA=0x{ep:X}',
+              'Architecture=x64', 'RWXSections=NONE',
+              'Sections=' + ','.join(f'{n}:0x{c:08X}' for n,c in sections),
+              'StaticForbiddenTokenScan=PASS'
+          ]
+          pathlib.Path('verify-report.txt').write_text('\n'.join(report)+'\n', encoding='utf-8')
+          print('\n'.join(report))
+          '@ | python -
+
+      - name: Microsoft Defender exact-file scan
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = (Resolve-Path '.\PremiumPlusCombo-FINAL-062F-CLEAN.exe').Path
+          $candidates = @()
+          $platform = "$env:ProgramData\Microsoft\Windows Defender\Platform"
+          if (Test-Path $platform) {
+            $candidates += Get-ChildItem $platform -Filter MpCmdRun.exe -Recurse -ErrorAction SilentlyContinue | Sort-Object FullName -Descending
+          }
+          $legacy = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if (Test-Path $legacy) { $candidates += Get-Item $legacy }
+          $mp = $candidates | Select-Object -First 1
+          if (-not $mp) { throw 'MpCmdRun.exe not found' }
+
+          $out = & $mp.FullName -Scan -ScanType 3 -File $exe -DisableRemediation 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          $out | Set-Content defender-scan.txt -Encoding UTF8
+          "DefenderExitCode=$code" | Add-Content defender-scan.txt
+          if ($code -ne 0) { throw "Defender exact-file scan failed with exit code $code`n$out" }
+          if (-not (Test-Path $exe)) { throw 'EXE missing after Defender scan' }
+
+          $threat = Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object {
+            ($_.Resources -join ' ') -like '*PremiumPlusCombo-FINAL-062F-CLEAN.exe*'
+          }
+          if ($threat) {
+            $threat | Format-List * | Out-String | Add-Content defender-scan.txt
+            throw 'Microsoft Defender reported a threat for the exact EXE'
+          }
+          'DefenderScan=PASS' | Add-Content defender-scan.txt
+          Get-Content defender-scan.txt
+
+      - name: Final hash after Defender
+        shell: pwsh
+        run: |
+          $sha = (Get-FileHash '.\PremiumPlusCombo-FINAL-062F-CLEAN.exe' -Algorithm SHA256).Hash
+          if ($sha -ne '3A37F66A1A7AC57463FE3227BFD86E52EBD45068C1A6D5642F19CC009A932E1C') { throw "post-scan SHA mismatch $sha" }
+          "PostDefenderSHA256=$sha" | Add-Content verify-report.txt
+          'PostDefenderHash=PASS' | Add-Content verify-report.txt
+
+      - name: Upload Defender-clean EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-Windows-x64-DEFENDER-CLEAN
+          if-no-files-found: error
+          path: |
+            PremiumPlusCombo-FINAL-062F-CLEAN.exe
+            defender-scan.txt
+            verify-report.txt
