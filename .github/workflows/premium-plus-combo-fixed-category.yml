@@ -117,6 +117,7 @@ jobs:
           name: PremiumPlusCombo-Windows-x64-REFERENCE-INPUT-RESPONSIVE
           path: |
             premium_plus_combo_final/final-build/PremiumPlusCombo.exe
+            premium_plus_combo_final/final-build/main.cpp
             premium_plus_combo_final/final-build/BUILD-INFO.txt
             premium_plus_combo_final/final-build/self-test-report.txt
             premium_plus_combo_final/final-build/defender-scan.txt
