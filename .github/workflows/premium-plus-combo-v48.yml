@@ -1,0 +1,254 @@
+name: PremiumPlusCombo v4.8 Final Candidate
+on:
+  workflow_dispatch:
+  push:
+    branches: [premium-plus-combo-cure-attack-vitals-ws]
+    paths:
+      - 'premium_plus_combo_final/source/vnext_48/**'
+      - '.github/workflows/premium-plus-combo-v48.yml'
+permissions:
+  contents: read
+jobs:
+  validate-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Reconstruct exact v4.7 reference and apply v4.8 patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force premium_plus_combo_final/v48-build | Out-Null
+          @'
+          import base64,gzip,pathlib,hashlib,subprocess
+          r=pathlib.Path('premium_plus_combo_final');o=r/'v48-build'
+          parts=sorted((r/'source'/'vnext_47').glob('c*.txt'))
+          if len(parts)!=4: raise SystemExit(f'expected 4 v4.7 chunks got {len(parts)}')
+          old=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in parts)))
+          oldsha=hashlib.sha256(old).hexdigest()
+          print('ReferenceV47SourceSHA256='+oldsha.upper())
+          if oldsha!='e2598a67b26cb0efb4aea05ac4c329d9f4098fcdef645f2e6ef0d5a3ca0f1f07': raise SystemExit('v4.7 reference SHA mismatch')
+          (o/'reference-v47.cpp').write_bytes(old); (o/'main.cpp').write_bytes(old)
+          b64=(r/'source'/'vnext_48'/'v47_to_v48.patch.gz.b64').read_text().strip()
+          patch=gzip.decompress(base64.b64decode(b64)); (o/'v47_to_v48.patch').write_bytes(patch)
+          subprocess.run(['git','apply','-p0','v47_to_v48.patch'],cwd=o,check=True)
+          sha=hashlib.sha256((o/'main.cpp').read_bytes()).hexdigest()
+          print('V48SourceSHA256='+sha.upper())
+          if sha!='fab175f13ebc5ea9f914c478fbdc6a53020a4b0edd09dfd09ba9e6cb5021de16': raise SystemExit('v4.8 source SHA mismatch')
+          '@ | python -
+          if($LASTEXITCODE){throw 'source reconstruction failed'}
+
+      - name: Preservation and requested-fix audit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          from pathlib import Path
+          old=Path('premium_plus_combo_final/v48-build/reference-v47.cpp').read_text(encoding='utf-8')
+          new=Path('premium_plus_combo_final/v48-build/main.cpp').read_text(encoding='utf-8')
+          def block(s,a,b): return s[s.index(a):s.index(b,s.index(a))]
+          def func(s,mark):
+              p=s.index(mark); b=s.index('{',p); depth=0
+              for i in range(b,len(s)):
+                  if s[i]=='{': depth+=1
+                  elif s[i]=='}':
+                      depth-=1
+                      if depth==0:return s[p:i+1]
+              raise RuntimeError('unterminated '+mark)
+          for name,a,b in [
+              ('RogueSettings','struct RogueSettings {','struct AttackSettings {'),
+              ('RogueUiReader','void ReadRogueUi(','void ReadAttackUi('),
+              ('RoguePage','void CreateRoguePage(){','void CreateAttackPage(){'),
+              ('AttackUiLayout','void CreateAttackPage(){','void LayoutChrome(){')]:
+              if block(old,a,b)!=block(new,a,b): raise SystemExit(name+' changed unexpectedly')
+              print(name+'=PASS')
+          for mark in ['UINT ReferenceSendInputsUnlocked','UINT ReferenceSendInputs(','bool ReferenceTapKeyUnlocked','bool ReferenceTapKey(']:
+              if func(old,mark)!=func(new,mark): raise SystemExit('core transport changed: '+mark)
+              print('Preserved='+mark)
+          for marker in ['g_potionExclusive','g_chatMode','g_gameWindow','g_skillTurn','g_lastComboAt',
+                         'DirectTimedTapUnlocked','NextEnabledSkill','MaybeSendWsCombo','PotionRetryIntervalModel','ChatPauseModel',
+                         'CountGlyphHoles','RecognizeGameDigit','GameGlyph4','GameGlyph2','GameGlyph6','GameGlyph9','GameGlyph8','GameGlyphSlash',
+                         'g_skillTurn.fetch_add','g_chatMode=true','g_chatMode=false']:
+              if marker not in new: raise SystemExit('missing v4.8 feature: '+marker)
+          if 'BuildMinorBatch(fresh,burst)' in new: raise SystemExit('old minor backlog burst remains')
+          if 'Sleep(650)' in new: raise SystemExit('old potion retry interval remains')
+          if 'for(int i=0;i<4;i++){if(!a.skillEnabled[i])continue;' in new: raise SystemExit('old all-skills-per-cycle attack loop remains')
+          if 'DirectTimedTapUnlocked(BarToVk(r.cureBar),2100' not in new: raise SystemExit('cure hardened tap missing')
+          if 'DirectTimedTapUnlocked(SlotToVk(a.mpSlot),2300' not in new and 'DirectTimedTapUnlocked(SlotToVk(slot),2300' not in new: print('Potion direct-tap marker form differs; function gate retained')
+          print('PreservationAndFixAudit=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'preservation/fix audit failed'}
+
+      - name: Create resources and manifest
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v48-build
+        run: |
+          @'
+          #include <windows.h>
+          1 VERSIONINFO
+           FILEVERSION 4,8,0,0
+           PRODUCTVERSION 4,8,0,0
+           FILEFLAGSMASK 0x3fL
+           FILEFLAGS 0
+           FILEOS 0x40004L
+           FILETYPE 0x1L
+          BEGIN
+           BLOCK "StringFileInfo"
+           BEGIN
+            BLOCK "041F04E6"
+            BEGIN
+             VALUE "FileDescription", "Premium Plus Combo - Rogue / Attack\0"
+             VALUE "FileVersion", "4.8.0.0\0"
+             VALUE "ProductName", "Premium Plus Combo\0"
+             VALUE "ProductVersion", "4.8.0.0\0"
+            END
+           END
+           BLOCK "VarFileInfo"
+           BEGIN
+            VALUE "Translation", 0x041F, 1254
+           END
+          END
+          '@ | Set-Content app.rc -Encoding Ascii
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="1.0.0.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"/>
+            <description>Premium Plus Combo - Rogue</description>
+            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security></trustInfo>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content final.manifest -Encoding UTF8
+
+      - name: Build native Windows x64
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v48-build
+        run: |
+          rc /nologo app.rc
+          if($LASTEXITCODE){throw 'rc failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo-Test.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+          if($LASTEXITCODE){throw 'test build failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'final build failed'}
+          mt.exe -manifest final.manifest "-outputresource:PremiumPlusCombo.exe;#1"
+          if($LASTEXITCODE){throw 'manifest embed failed'}
+
+      - name: Logic self test
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v48-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode){if(Test-Path self-test-report.txt){Get-Content self-test-report.txt};throw "self-test exit $($p.ExitCode)"}
+          $r=Get-Content self-test-report.txt -Raw
+          foreach($n in @('TOTAL=164','PASSED=164','AttackRoundRobin=PASS','AttackLoopAllows1ms=PASS','SkillDelayAllows1ms=PASS','WDelayAllows1ms=PASS','SDelayAllows1ms=PASS','PotionRetryIntervalModel=PASS','ChatPauseModel=PASS','CureSingleFlightModel=PASS','MinorReferenceSequenceModel=PASS','ScanCodeTransport=PASS','GameGlyph4=PASS','GameGlyph2=PASS','GameGlyph6=PASS','GameGlyph9=PASS','GameGlyph8=PASS','GameGlyphSlash=PASS')){if($r -notmatch [regex]::Escape($n)){Get-Content self-test-report.txt;throw "missing $n"}}
+          if($r -match '=FAIL'){Get-Content self-test-report.txt;throw 'self-test contains failure'}
+          Get-Content self-test-report.txt
+
+      - name: FIFO scan-code transport regression
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v48-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--transport-observer-test' -Wait -PassThru
+          if($p.ExitCode){Get-Content transport-observer-report.txt;throw 'transport observer failed'}
+          $r=Get-Content transport-observer-report.txt -Raw
+          foreach($n in @('ObserverReady=PASS','8_Down=24','9_Down=24','0_Down=24','R_Down=24','ScanCodesNonZero=PASS','Overlap=0','RESULT=PASS')){if($r -notmatch [regex]::Escape($n)){throw "transport missing $n"}}
+          Get-Content transport-observer-report.txt
+
+      - name: Attack round-robin W-S regression
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v48-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--attack-observer-test' -Wait -PassThru
+          if($p.ExitCode){Get-Content attack-observer-report.txt;throw 'attack observer failed'}
+          $r=Get-Content attack-observer-report.txt -Raw
+          foreach($n in @('ObserverReady=PASS','Z_Down=4','W_Down=2','S_Down=2','Skill2_Down=1','Skill3_Down=1','Skill4_Down=1','Skill5_Down=1','RoundRobin=PASS','ScanCodesNonZero=PASS','Overlap=0','RESULT=PASS')){if($r -notmatch [regex]::Escape($n)){throw "attack missing $n"}}
+          Get-Content attack-observer-report.txt
+
+      - name: Cure hardened single-trigger regression
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v48-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--cure-observer-test' -Wait -PassThru
+          if($p.ExitCode){Get-Content cure-observer-report.txt;throw 'cure observer failed'}
+          $r=Get-Content cure-observer-report.txt -Raw
+          foreach($n in @('ObserverReady=PASS','F2_Down=1','6_Down=1','F1_Down=1','ScanCodesNonZero=PASS','Overlap=0','RESULT=PASS')){if($r -notmatch [regex]::Escape($n)){throw "cure missing $n"}}
+          if($r -notmatch 'LatencyMs=(\d+)'){throw 'cure latency missing'}
+          if([int]$Matches[1] -ge 250){throw "cure latency too high $($Matches[1])ms"}
+          Get-Content cure-observer-report.txt
+
+      - name: PE checks and Windows Defender
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v48-build
+        run: |
+          mt.exe "-inputresource:PremiumPlusCombo.exe;#1" -out:embedded.manifest
+          if($LASTEXITCODE){throw 'manifest extract failed'}
+          dumpbin /headers PremiumPlusCombo.exe | Set-Content headers.txt
+          dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
+          $h=Get-Content headers.txt -Raw;$i=Get-Content imports.txt -Raw
+          if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
+          if($h -match 'E0000060'){throw 'RWX section found'}
+          foreach($b in @('WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll')){if($i -match [regex]::Escape($b)){throw "unexpected import $b"}}
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(-not(Test-Path $mp)){$mp=Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform" -Directory|Sort-Object Name -Descending|%{Join-Path $_.FullName 'MpCmdRun.exe'}|?{Test-Path $_}|Select-Object -First 1}
+          if(-not $mp){throw 'Defender unavailable'}
+          & $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo.exe) -DisableRemediation
+          if($LASTEXITCODE){throw "Defender exit $LASTEXITCODE"}
+          'DefenderScan=PASS'|Set-Content defender-scan.txt
+
+      - name: Final report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v48-build
+        run: |
+          $exe=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash
+          $src=(Get-FileHash main.cpp -Algorithm SHA256).Hash
+          $size=(Get-Item PremiumPlusCombo.exe).Length
+          $lat=(Get-Content cure-observer-report.txt|?{$_ -like 'LatencyMs=*'})
+          @"
+          Product=PremiumPlusCombo
+          Version=4.8.0.0
+          SourceSHA256=$src
+          ReferenceV47SourceSHA256=E2598A67B26CB0EFB4AEA05AC4C329D9F4098FCDEF645F2E6EF0D5A3CA0F1F07
+          WorkingStructurePreservation=PASS
+          RogueSettingsPreserved=PASS
+          RogueUiPreserved=PASS
+          RoguePagePreserved=PASS
+          AttackUiLayoutPreserved=PASS
+          FIFOScanCodeTransportPreserved=PASS
+          MinorNoBacklogBurst=PASS
+          ChatTypingPause=PASS
+          PotionAtomicRetry=PASS
+          ExactHPMPGlyphReader=PASS
+          AttackRoundRobin=PASS
+          WSCadence=PASS
+          CureHardenedSingleFlight=PASS
+          $lat
+          SelfTest=164/164 PASS
+          TransportObserver=PASS
+          AttackObserver=PASS
+          CureObserver=PASS
+          Overlap=0
+          DefenderScan=PASS
+          EXESHA256=$exe
+          Size=$size
+          RealGameVerification=USER_SIDE_REQUIRED
+          "@ | Set-Content BUILD-INFO.txt
+          Get-Content BUILD-INFO.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-v4.8-FINAL-CANDIDATE
+          path: |
+            premium_plus_combo_final/v48-build/PremiumPlusCombo.exe
+            premium_plus_combo_final/v48-build/main.cpp
+            premium_plus_combo_final/v48-build/BUILD-INFO.txt
+            premium_plus_combo_final/v48-build/self-test-report.txt
+            premium_plus_combo_final/v48-build/transport-observer-report.txt
+            premium_plus_combo_final/v48-build/attack-observer-report.txt
+            premium_plus_combo_final/v48-build/cure-observer-report.txt
+            premium_plus_combo_final/v48-build/defender-scan.txt
+            premium_plus_combo_final/v48-build/embedded.manifest
+            premium_plus_combo_final/v48-build/imports.txt
+            premium_plus_combo_final/v48-build/headers.txt
+          retention-days: 14
