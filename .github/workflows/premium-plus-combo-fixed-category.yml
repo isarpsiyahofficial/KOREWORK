@@ -41,7 +41,11 @@ jobs:
           old='r.left=std::clamp(r.left,vx,vx+vw);r.right=std::clamp(r.right,vx,vx+vw);r.top=std::clamp(r.top,vy,vy+vh);r.bottom=std::clamp(r.bottom,vy,vy+vh);'
           new='r.left=std::clamp<LONG>(r.left,(LONG)vx,(LONG)(vx+vw));r.right=std::clamp<LONG>(r.right,(LONG)vx,(LONG)(vx+vw));r.top=std::clamp<LONG>(r.top,(LONG)vy,(LONG)(vy+vh));r.bottom=std::clamp<LONG>(r.bottom,(LONG)vy,(LONG)(vy+vh));'
           if text.count(old)!=1: raise SystemExit('NormalizeScreenRect clamp patch target mismatch')
-          raw=text.replace(old,new,1).encode('utf-8')
+          text=text.replace(old,new,1)
+          old2='int EstimateFill(const std::vector<RGBc>& col){int n=(int)col.size();if(n<5)return -1;int edge=std::max(1,n/12);RGBc L{},R{};for(int i=0;i<edge;i++){L.r+=col[i].r;L.g+=col[i].g;L.b+=col[i].b;R.r+=col[n-1-i].r;R.g+=col[n-1-i].g;R.b+=col[n-1-i].b;}L.r/=edge;L.g/=edge;L.b/=edge;R.r/=edge;R.g/=edge;R.b/=edge;double lr=Dist(L,R);if(lr<22){double score=0;for(auto&c:col)score+=0.65*Sat(c)+0.35*Lum(c);score/=n;return score>0.34?100:0;}int filled=0;for(int i=0;i<n;i++){double dl=Dist(col[i],L),dr=Dist(col[i],R);if(dl<=dr*1.10)filled=i+1;else if(i>edge)break;}return std::clamp((int)std::lround(100.0*filled/n),0,100);}'
+          new2='int EstimateFill(const std::vector<RGBc>& col){int n=(int)col.size();if(n<5)return -1;int edge=std::max(1,n/12);RGBc L{},R{};for(int i=0;i<edge;i++){L.r+=col[i].r;L.g+=col[i].g;L.b+=col[i].b;R.r+=col[n-1-i].r;R.g+=col[n-1-i].g;R.b+=col[n-1-i].b;}L.r/=edge;L.g/=edge;L.b/=edge;R.r/=edge;R.g/=edge;R.b/=edge;double sL=Sat(L),sR=Sat(R),sumL=L.r+L.g+L.b,sumR=R.r+R.g+R.b;double chroma=999;if(sumL>1&&sumR>1){double lr0=L.r/sumL-R.r/sumR,lg0=L.g/sumL-R.g/sumR,lb0=L.b/sumL-R.b/sumR;chroma=std::sqrt(lr0*lr0+lg0*lg0+lb0*lb0);}if(sL>0.15&&sR>0.15&&std::abs(sL-sR)<0.08&&chroma<0.04)return 100;double lr=Dist(L,R);if(lr<22){double score=0;for(auto&c:col)score+=0.65*Sat(c)+0.35*Lum(c);score/=n;return score>0.34?100:0;}int filled=0;for(int i=0;i<n;i++){double dl=Dist(col[i],L),dr=Dist(col[i],R);if(dl<=dr*1.10)filled=i+1;else if(i>edge)break;}return std::clamp((int)std::lround(100.0*filled/n),0,100);}'
+          if text.count(old2)!=1: raise SystemExit('EstimateFill patch target mismatch')
+          raw=text.replace(old2,new2,1).encode('utf-8')
           out.joinpath('main.cpp').write_bytes(raw)
           out.joinpath('left.jpg').write_bytes(base64.b64decode(src.joinpath('left.jpg.b64').read_text().strip()))
           out.joinpath('right.jpg').write_bytes(base64.b64decode(src.joinpath('right.jpg.b64').read_text().strip()))
@@ -49,7 +53,7 @@ jobs:
           '@ | python -
           if($LASTEXITCODE -ne 0){throw 'reconstruction failed'}
           $sha=(Get-FileHash premium_plus_combo_final/final-build/main.cpp -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($sha -ne '24ddbbc955103035af2f8ce50c511f0b41eab5ba58d0ce3fdb523b7fb7899662'){throw "source SHA mismatch: $sha"}
+          if($sha -ne '4435a42867b8e0439d8f9d9d98b0016849fe064754ea494042cfdd0442b378bd'){throw "source SHA mismatch: $sha"}
           if((Get-FileHash premium_plus_combo_final/final-build/left.jpg -Algorithm SHA256).Hash.ToLowerInvariant() -ne '4a6a3dbfbb47e4c55b89f491b8c06925eee206cd9a213a48f1f9625a3d4822ed'){throw 'left resource mismatch'}
           if((Get-FileHash premium_plus_combo_final/final-build/right.jpg -Algorithm SHA256).Hash.ToLowerInvariant() -ne '704328405933e1aa423acdf257c6ed6ca985f556d82980a3cbd1e8bf01b94146'){throw 'right resource mismatch'}
           $code=Get-Content premium_plus_combo_final/final-build/main.cpp -Raw
@@ -141,7 +145,7 @@ jobs:
           Architecture=x64
           StaticCRT=PASS
           ReferenceSHA256=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856
-          SourceSHA256=24DDBBC955103035AF2F8CE50C511F0B41EAB5BA58D0CE3FDB523B7FB7899662
+          SourceSHA256=4435A42867B8E0439D8F9D9D98B0016849FE064754EA494042CFDD0442B378BD
           UI=800px reference-style + left ROGUE/ATTACK navigation
           Minor=separate Start/Stop + GameBridge v1 + 150/300 target
           Attack=independent Start/Stop + Z + per-skill F1-F12/1-0
