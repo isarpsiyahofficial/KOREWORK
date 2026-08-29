@@ -1,0 +1,200 @@
+name: PremiumPlusCombo FIFO Transport Patch
+on:
+  workflow_dispatch:
+  push:
+    branches: [premium-plus-combo-timed-input-fix]
+    paths:
+      - 'premium_plus_combo_final/source/fifo_transport.patch'
+      - '.github/workflows/premium-plus-combo-fifo-patch.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Reconstruct validated baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force premium_plus_combo_final/fifo-patch-build | Out-Null
+          @'
+          import base64,gzip,pathlib,hashlib
+          p=pathlib.Path('premium_plus_combo_final/source/timed_exact')
+          parts=sorted(p.glob('part*.txt'))
+          if len(parts)!=2: raise SystemExit(f'expected 2 baseline chunks, got {len(parts)}')
+          raw=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in parts)))
+          sha=hashlib.sha256(raw).hexdigest()
+          print('BaselineSourceSHA256='+sha.upper())
+          if sha!='d522959ea955ef788af1df00dfff2dd30bd8566fcbb728823ed39de542d19535': raise SystemExit('baseline source SHA mismatch')
+          pathlib.Path('premium_plus_combo_final/fifo-patch-build/main.cpp').write_bytes(raw)
+          '@ | python -
+          if($LASTEXITCODE){throw 'baseline reconstruction failed'}
+      - name: Apply transport-only patch
+        shell: pwsh
+        working-directory: premium_plus_combo_final/fifo-patch-build
+        run: |
+          $ErrorActionPreference='Stop'
+          git apply --whitespace=nowarn ..\source\fifo_transport.patch
+          if($LASTEXITCODE){throw 'git apply failed'}
+          $sha=(Get-FileHash .\main.cpp -Algorithm SHA256).Hash
+          Write-Host "PatchedSourceSHA256=$sha"
+          if($sha -ne '08BB8807B2AA2E3CF416CC8FF417EBBB245BDE3128CFFE4FAF2B7349D82FC8DB'){throw 'patched source SHA mismatch'}
+          $c=Get-Content .\main.cpp -Raw
+          foreach($must in @('struct FifoTicketLock','nextTicket.fetch_add','serving.load','KEYEVENTF_SCANCODE','PreciseDelayUs(1000)','PreciseDelayUs(75)','kMagicInput','FifoTicketGuard sequence(g_gameInputGate)','ReferenceTapKeyUnlocked','BridgeSelectiveRouting','--transport-observer-test')){if(-not $c.Contains($must)){throw "transport gate missing: $must"}}
+          foreach($bad in @('g_actionMutex','g_bridgeWriteMutex')){if($c.Contains($bad)){throw "legacy input mutex remains: $bad"}}
+      - name: Verify UI registry and settings preservation
+        shell: pwsh
+        run: |
+          @'
+          import base64,gzip,pathlib
+          p=pathlib.Path('premium_plus_combo_final/source/timed_exact')
+          base=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in sorted(p.glob('part*.txt'))))).decode('utf-8')
+          mod=pathlib.Path('premium_plus_combo_final/fifo-patch-build/main.cpp').read_text(encoding='utf-8')
+          checks=[]
+          checks.append(('IdentityAndSettingsStructs',base[:base.index('HINSTANCE g_instance{}')],mod[:mod.index('HINSTANCE g_instance{}')]))
+          checks.append(('RegistryLoadSave',base[base.index('DWORD ReadDword'):base.index('bool InitBridge')],mod[mod.index('DWORD ReadDword'):mod.index('bool InitBridge')]))
+          checks.append(('HotkeyPowerHelpers',base[base.index('std::wstring KeyName'):base.index('bool ConflictWithRogue')],mod[mod.index('std::wstring KeyName'):mod.index('bool ConflictWithRogue')]))
+          checks.append(('UILayoutWindowCode',base[base.index('NormalizedRect NormalizeScreenRect'):base.index('bool RunSelfTest')],mod[mod.index('NormalizedRect NormalizeScreenRect'):mod.index('LRESULT CALLBACK TransportObserverProc')]))
+          for name,a,b in checks:
+              if a!=b: raise SystemExit(name+' changed')
+              print(name+'=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'preservation gate failed'}
+      - name: Create resources
+        shell: pwsh
+        working-directory: premium_plus_combo_final/fifo-patch-build
+        run: |
+          @'
+          #include <windows.h>
+          1 VERSIONINFO
+           FILEVERSION 4,5,1,0
+           PRODUCTVERSION 4,5,1,0
+           FILEFLAGSMASK 0x3fL
+           FILEFLAGS 0
+           FILEOS 0x40004L
+           FILETYPE 0x1L
+          BEGIN
+           BLOCK "StringFileInfo"
+           BEGIN
+            BLOCK "041F04E6"
+            BEGIN
+             VALUE "FileDescription", "Premium Plus Combo - Rogue / Attack\0"
+             VALUE "FileVersion", "4.5.1.0\0"
+             VALUE "ProductName", "Premium Plus Combo\0"
+             VALUE "ProductVersion", "4.5.1.0\0"
+            END
+           END
+           BLOCK "VarFileInfo"
+           BEGIN
+            VALUE "Translation", 0x041F, 1254
+           END
+          END
+          '@ | Set-Content app.rc -Encoding Ascii
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="1.0.0.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"/>
+            <description>Premium Plus Combo - Rogue</description>
+            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security></trustInfo>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content final.manifest -Encoding UTF8
+      - name: Build native x64
+        shell: pwsh
+        working-directory: premium_plus_combo_final/fifo-patch-build
+        run: |
+          rc /nologo app.rc
+          if($LASTEXITCODE){throw 'rc failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo-Test.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+          if($LASTEXITCODE){throw 'test build failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'final build failed'}
+          mt.exe -manifest final.manifest "-outputresource:PremiumPlusCombo.exe;#1"
+          if($LASTEXITCODE){throw 'manifest embed failed'}
+      - name: Logic self test
+        shell: pwsh
+        working-directory: premium_plus_combo_final/fifo-patch-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode){throw "self-test exit $($p.ExitCode)"}
+          $r=Get-Content self-test-report.txt -Raw
+          Get-Content self-test-report.txt
+          if($r -notmatch 'TOTAL=140' -or $r -notmatch 'PASSED=140' -or $r -match '=FAIL'){throw 'self-test failed'}
+          foreach($n in @('ScanCodeTransport=PASS','FifoTicketLockInitial=PASS','MinorReferenceSequenceModel=PASS','AttackPerSkillBarSlotSequence=PASS','CureSequenceF2_6_F1=PASS','BridgeSelectiveRouting=PASS')){if($r -notmatch [regex]::Escape($n)){throw "missing $n"}}
+      - name: Low-level keyboard observer test
+        shell: pwsh
+        working-directory: premium_plus_combo_final/fifo-patch-build
+        run: |
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--transport-observer-test' -PassThru
+          if(-not $p.WaitForExit(15000)){$p.Kill();throw 'transport observer timeout'}
+          if($p.ExitCode){if(Test-Path transport-observer-report.txt){Get-Content transport-observer-report.txt};throw "observer exit $($p.ExitCode)"}
+          $r=Get-Content transport-observer-report.txt -Raw
+          Get-Content transport-observer-report.txt
+          foreach($n in @('ObserverReady=PASS','ScanCodesNonZero=PASS','Overlap=0','RESULT=PASS')){if($r -notmatch [regex]::Escape($n)){throw "observer missing $n"}}
+          foreach($key in @('8_Down','9_Down','0_Down','R_Down')){if($r -notmatch "$key=([1-9][0-9]*)"){throw "$key not observed"}}
+      - name: PE manifest and Defender
+        shell: pwsh
+        working-directory: premium_plus_combo_final/fifo-patch-build
+        run: |
+          mt.exe "-inputresource:PremiumPlusCombo.exe;#1" -out:embedded.manifest
+          if($LASTEXITCODE){throw 'manifest extract failed'}
+          dumpbin /headers PremiumPlusCombo.exe | Set-Content headers.txt
+          dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
+          $h=Get-Content headers.txt -Raw;$i=Get-Content imports.txt -Raw
+          if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
+          if($h -match 'E0000060'){throw 'RWX section found'}
+          foreach($b in @('WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll')){if($i -match [regex]::Escape($b)){throw "unexpected import $b"}}
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(-not(Test-Path $mp)){$mp=Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform" -Directory|Sort-Object Name -Descending|%{Join-Path $_.FullName 'MpCmdRun.exe'}|?{Test-Path $_}|Select-Object -First 1}
+          if(-not $mp){throw 'Defender unavailable'}
+          & $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo.exe) -DisableRemediation
+          if($LASTEXITCODE){throw "Defender exit $LASTEXITCODE"}
+          'DefenderScan=PASS'|Set-Content defender-scan.txt
+      - name: Final report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/fifo-patch-build
+        run: |
+          $sha=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash
+          $size=(Get-Item PremiumPlusCombo.exe).Length
+          @"
+          Product=PremiumPlusCombo
+          Version=4.5.1.0
+          WorkingReferenceSHA256=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856
+          BaselineSourceSHA256=D522959EA955EF788AF1DF00DFFF2DD30BD8566FCBB728823ED39DE542D19535
+          PatchedSourceSHA256=08BB8807B2AA2E3CF416CC8FF417EBBB245BDE3128CFFE4FAF2B7349D82FC8DB
+          Scope=GAME_INPUT_TRANSPORT_ONLY
+          UIRegistrySettingsPreservation=PASS
+          Transport=KEYEVENTF_SCANCODE
+          KeyDownHoldUs=1000
+          ReleaseGapUs=75
+          Serialization=FIFO_TICKET_LOCK
+          CureSequenceAtomic=PASS
+          AttackSequenceAtomic=PASS
+          MagicExtraInfo=PPCOMBO
+          Observer8=PASS
+          Observer9=PASS
+          Observer0=PASS
+          ObserverR=PASS
+          ObserverOverlap=0
+          SelfTest=140/140 PASS
+          DefenderScan=PASS
+          SHA256=$sha
+          Size=$size
+          RealGameVerification=USER_SIDE_REQUIRED
+          "@ | Set-Content BUILD-INFO.txt
+          Get-Content BUILD-INFO.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-Windows-x64-FIFO-SCANCODE-PATCH
+          path: |
+            premium_plus_combo_final/fifo-patch-build/PremiumPlusCombo.exe
+            premium_plus_combo_final/fifo-patch-build/BUILD-INFO.txt
+            premium_plus_combo_final/fifo-patch-build/self-test-report.txt
+            premium_plus_combo_final/fifo-patch-build/transport-observer-report.txt
+            premium_plus_combo_final/fifo-patch-build/defender-scan.txt
+            premium_plus_combo_final/fifo-patch-build/embedded.manifest
+          retention-days: 14
