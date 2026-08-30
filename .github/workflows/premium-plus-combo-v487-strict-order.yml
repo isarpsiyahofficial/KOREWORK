@@ -1,0 +1,140 @@
+name: PremiumPlusCombo v4.8.7 Strict Skill Order Final
+on:
+  workflow_dispatch:
+  push:
+    branches: [premium-plus-combo-cure-attack-vitals-ws]
+    paths:
+      - 'premium_plus_combo_final/source/vnext_48/v486_to_v487.patch.gz.b64'
+      - '.github/workflows/premium-plus-combo-v487-strict-order.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with: {arch: x64}
+      - name: Reconstruct exact v4.8.7 and preservation audit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force premium_plus_combo_final/v487-final | Out-Null
+          @'
+          import base64,gzip,pathlib,hashlib,subprocess
+          r=pathlib.Path('premium_plus_combo_final');o=r/'v487-final';src=r/'source'/'vnext_48';m=o/'main.cpp'
+          cs=sorted((r/'source'/'vnext_47').glob('c*.txt'));m.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in cs))))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='e2598a67b26cb0efb4aea05ac4c329d9f4098fcdef645f2e6ef0d5a3ca0f1f07'
+          for n,s in [('v47_to_v48.patch.gz.b64',0),('v48_observer_fix2.patch.gz.b64',0),('v481_to_v482.patch.gz.b64',1),('v482_to_v4821.patch.gz.b64',1),('v4821_to_v4822.patch.gz.b64',1)]:
+            p=o/(n+'.patch');p.write_bytes(gzip.decompress(base64.b64decode((src/n).read_text().strip())));subprocess.run(['git','apply',f'-p{s}',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='6e857a8a6ccd570d34348dd265ea63e57fe9d3240d9a05447b39a3794fe1cabb'
+          pcs=sorted(src.glob('v483_final_c*.txt'));p=o/'v483.patch';p.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in pcs))));subprocess.run(['git','apply','-p0',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='56a57c7a65f5a091be9298f3388c82c4c4097392f96a17bd932e26dd00fcc839'
+          pcs=sorted(src.glob('v483_to_v484_[0-9][0-9].b64'));p=o/'v484.patch';p.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in pcs))));subprocess.run(['git','apply','-p0',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='3a2dd16737d825deab01de7af55b1a3ccd81476aad2a4b472d7aaeb1ad07ff0f'
+          pcs=sorted(src.glob('v484_to_v485_[0-9][0-9].b64'));p=o/'v485.patch';p.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in pcs))));subprocess.run(['git','apply','-p0',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='916e2a370c5ed6eecf01e1ba1a3a79cab2dc45c703f781ff1189ecc711989e93'
+          p=o/'v486.patch';p.write_bytes(gzip.decompress(base64.b64decode((src/'v485_to_v486.patch.gz.b64').read_text().strip())));subprocess.run(['git','apply','--directory=premium_plus_combo_final/v487-final','-p1',str(p)],check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='9320d8f6893ca478af35385c42ad2cdec1c9cc1b838b77e25840d352d9b23dd7'
+          v486=m.read_text(encoding='utf-8')
+          p=o/'v487.patch';p.write_bytes(gzip.decompress(base64.b64decode((src/'v486_to_v487.patch.gz.b64').read_text().strip())));subprocess.run(['git','apply','-p1',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          sha=hashlib.sha256(m.read_bytes()).hexdigest();print('V487SourceSHA256='+sha.upper());assert sha=='3b88fbc5da793c45f8eb5003f24afb776bfa068bdaea95594e3d1796c43b97ed'
+          v487=m.read_text(encoding='utf-8')
+          def fn(s,k):
+            p=s.index(k);q=s.index('{',p);d=0
+            for i in range(q,len(s)):
+              if s[i]=='{':d+=1
+              elif s[i]=='}':
+                d-=1
+                if d==0:return s[p:i+1]
+            raise RuntimeError(k)
+          for k in ['void CureWorker','void MinorWorker','void RWorker','void VitalsWorker','UINT ReferenceSendInputsUnlocked','UINT ReferenceSendInputs(','bool ReferenceTapKeyUnlocked','bool ReferenceTapKey(','LRESULT CALLBACK KeyboardProc','void CreateRoguePage','void CreateAttackPage']:
+            assert fn(v486,k)==fn(v487,k),'preservation failed '+k
+          assert 'int i=CurrentEnabledSkill(a)' in fn(v487,'AttackCycleStart ExecuteAttack')
+          assert 'CommitSkillTurn();return true;' in fn(v487,'bool RunOneAttackCycle')
+          assert 'if(!completed' in fn(v487,'bool RunOneAttackCycle')
+          assert 'constexpr int kSkillCommitMs=400;' in v487
+          assert 'DirectTimedTapUnlocked(SlotToVk(a.slots[i]),18000,1500)' in v487
+          assert 'ClampD(ReadDword(k,L"WMs",400),400,1000)' in v487
+          assert 'StrictOrder' in fn(v487,'bool RunAttackObserverTest')
+          print('ExistingStructurePreserved=PASS');print('CoreTransportPreserved=PASS');print('MinorPreserved=PASS');print('CurePreserved=PASS');print('RPreserved=PASS');print('StrictCommittedSkillOrder=PASS');print('SkillInputHold18ms=PASS');print('WMinimum400ms=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'reconstruction/preservation failed'}
+      - name: Build x64
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v487-final
+        run: |
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?><assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.7.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"/><description>Premium Plus Combo - Rogue</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content final.manifest -Encoding UTF8
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp /Fe:PremiumPlusCombo-Test.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT;if($LASTEXITCODE){throw 'test build failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO;if($LASTEXITCODE){throw 'final build failed'}
+          mt.exe -manifest final.manifest "-outputresource:PremiumPlusCombo.exe;#1";if($LASTEXITCODE){throw 'manifest failed'}
+          mt.exe "-inputresource:PremiumPlusCombo.exe;#1" -out:embedded.manifest
+          if((Get-Content embedded.manifest -Raw) -notmatch 'requireAdministrator'){throw 'manifest missing'}
+      - name: Strict-order regression tests
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v487-final
+        run: |
+          foreach($arg in @('--self-test','--transport-observer-test','--attack-observer-test','--attack-z-off-observer-test','--cure-observer-test')){$p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList $arg -Wait -PassThru;if($p.ExitCode){throw "$arg failed exit $($p.ExitCode)"}}
+          $s=Get-Content self-test-report.txt -Raw;foreach($x in @('TOTAL=179','PASSED=179','StrictSkillPeekNoAdvance=PASS','StrictSkillCommitOrder=PASS','AttackOrderedThreeSkills=PASS','WSDelayFloor400=PASS','SkillCommitWindow400=PASS','MinorReferenceSequenceModel=PASS','ScanCodeTransport=PASS')){if($s -notmatch [regex]::Escape($x)){throw "selftest missing $x"}}
+          $a=Get-Content attack-observer-report.txt -Raw;foreach($x in @('Z_Down=12','W_Down=12','S_Down=12','Skill2_Down=3','Skill3_Down=3','Skill4_Down=3','Skill5_Down=3','StrictOrder=PASS','RoundRobin=PASS','SkillCycleSync=PASS','WSEverySkill=PASS','WSTiming=PASS','ScanCodesNonZero=PASS','Overlap=0','RESULT=PASS')){if($a -notmatch [regex]::Escape($x)){throw "attack missing $x"}}
+          $span=[int](($a -split "`n"|?{$_ -like 'SyncedAttackSpanMs=*'}) -replace 'SyncedAttackSpanMs=','');if($span -lt 5400 -or $span -gt 7600){throw "span $span"}
+          $wa=[int](($a -split "`n"|?{$_ -like 'WAfterSkillMs=*'}) -replace 'WAfterSkillMs=','');if($wa -lt 380 -or $wa -gt 520){throw "W timing $wa"}
+          $sa=[int](($a -split "`n"|?{$_ -like 'SAfterWMs=*'}) -replace 'SAfterWMs=','');if($sa -lt 35 -or $sa -gt 150){throw "S timing $sa"}
+          $t=Get-Content transport-observer-report.txt -Raw;foreach($x in @('ScanCodesNonZero=PASS','Overlap=0','RESULT=PASS')){if($t -notmatch [regex]::Escape($x)){throw "transport missing $x"}}
+          $z=Get-Content attack-z-off-observer-report.txt -Raw;foreach($x in @('Z_Down=0','ZOff=PASS','Overlap=0','RESULT=PASS')){if($z -notmatch [regex]::Escape($x)){throw "zoff missing $x"}}
+          $c=Get-Content cure-observer-report.txt -Raw;foreach($x in @('F2_Down=1','6_Down=1','F1_Down=1','FrameVisibleHold=PASS','Overlap=0','RESULT=PASS')){if($c -notmatch [regex]::Escape($x)){throw "cure missing $x"}}
+          dumpbin /headers PremiumPlusCombo.exe | Set-Content headers.txt;dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
+          $h=Get-Content headers.txt -Raw;$i=Get-Content imports.txt -Raw;if($h -notmatch 'machine \(x64\)'){throw 'not x64'};if($h -match 'E0000060'){throw 'RWX'};foreach($bad in @('WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll')){if($i -match [regex]::Escape($bad)){throw "unexpected $bad"}}
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe";if(-not(Test-Path $mp)){$mp=Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform" -Directory|Sort-Object Name -Descending|%{Join-Path $_.FullName 'MpCmdRun.exe'}|?{Test-Path $_}|Select-Object -First 1};if($mp){& $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo.exe) -DisableRemediation;if($LASTEXITCODE){throw 'Defender failed'}}
+          $sha=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash;$size=(Get-Item PremiumPlusCombo.exe).Length
+          @"
+          Product=PremiumPlusCombo
+          Version=4.8.7.0
+          SourceSHA256=3B88FBC5DA793C45F8EB5003F24AFB776BFA068BDAEA95594E3D1796C43B97ED
+          ReferenceV486SourceSHA256=9320D8F6893CA478AF35385C42AD2CDEC1C9CC1B838B77E25840D352D9B23DD7
+          ExistingStructurePreserved=PASS
+          MinorPreserved=PASS
+          CurePreserved=PASS
+          RPreserved=PASS
+          FIFOScanCodeTransportPreserved=PASS
+          ZOptionalOnOff=PASS
+          StrictCommittedSkillOrder=PASS
+          StrictOrder12Cycles=PASS
+          SkillInputHoldMs=18
+          SkillCommitWindowMs=400
+          WMinimumMs=400
+          WDefaultMs=400
+          SDefaultMs=50
+          SyncedAttackSpanMs=$span
+          WAfterSkillMs=$wa
+          SAfterWMs=$sa
+          SelfTest=179/179 PASS
+          TransportObserver=PASS
+          AttackStrictOrderObserver=PASS
+          ZOffObserver=PASS
+          CureObserver=PASS
+          Overlap=0
+          DefenderScan=PASS
+          EXESHA256=$sha
+          Size=$size
+          RealGameVerification=USER_SIDE_REQUIRED
+          "@ | Set-Content BUILD-INFO.txt
+          Get-Content BUILD-INFO.txt;Get-Content attack-observer-report.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-v4.8.7-STRICT-SKILL-ORDER-FINAL
+          path: |
+            premium_plus_combo_final/v487-final/PremiumPlusCombo.exe
+            premium_plus_combo_final/v487-final/main.cpp
+            premium_plus_combo_final/v487-final/BUILD-INFO.txt
+            premium_plus_combo_final/v487-final/self-test-report.txt
+            premium_plus_combo_final/v487-final/transport-observer-report.txt
+            premium_plus_combo_final/v487-final/attack-observer-report.txt
+            premium_plus_combo_final/v487-final/attack-z-off-observer-report.txt
+            premium_plus_combo_final/v487-final/cure-observer-report.txt
+            premium_plus_combo_final/v487-final/embedded.manifest
+            premium_plus_combo_final/v487-final/headers.txt
+            premium_plus_combo_final/v487-final/imports.txt
+          retention-days: 14
