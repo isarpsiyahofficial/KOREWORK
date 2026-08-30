@@ -1,0 +1,92 @@
+name: PremiumPlusCombo v4.8.4 Build
+on:
+  workflow_dispatch:
+  push:
+    branches: [premium-plus-combo-cure-attack-vitals-ws]
+    paths: ['.github/workflows/premium-plus-combo-v484-build.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with: {arch: x64}
+      - name: Reconstruct source
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force premium_plus_combo_final/v484 | Out-Null
+          @'
+          import base64,gzip,pathlib,hashlib,subprocess
+          r=pathlib.Path('premium_plus_combo_final');o=r/'v484';src=r/'source'/'vnext_48'
+          cs=sorted((r/'source'/'vnext_47').glob('c*.txt'));m=o/'main.cpp'
+          m.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in cs))))
+          for n,s in [('v47_to_v48.patch.gz.b64',0),('v48_observer_fix2.patch.gz.b64',0),('v481_to_v482.patch.gz.b64',1),('v482_to_v4821.patch.gz.b64',1),('v4821_to_v4822.patch.gz.b64',1)]:
+            p=o/(n+'.patch');p.write_bytes(gzip.decompress(base64.b64decode((src/n).read_text().strip())));subprocess.run(['git','apply',f'-p{s}',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          pcs=sorted(src.glob('v483_final_c*.txt'));assert len(pcs)==4
+          p=o/'v483.patch';p.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in pcs))));subprocess.run(['git','apply','-p0',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='56a57c7a65f5a091be9298f3388c82c4c4097392f96a17bd932e26dd00fcc839'
+          ref=m.read_bytes();(o/'reference-v483.cpp').write_bytes(ref)
+          pcs=sorted(src.glob('v483_to_v484_[0-9][0-9].b64'));assert len(pcs)==2
+          p=o/'v484.patch';p.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in pcs))));subprocess.run(['git','apply','-p0',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          sha=hashlib.sha256(m.read_bytes()).hexdigest();print(sha);assert sha=='3a2dd16737d825deab01de7af55b1a3ccd81476aad2a4b472d7aaeb1ad07ff0f'
+          a=ref.decode();b=m.read_text()
+          def fn(s,k):
+            p=s.index(k);q=s.index('{',p);d=0
+            for i in range(q,len(s)):
+              if s[i]=='{':d+=1
+              elif s[i]=='}':
+                d-=1
+                if d==0:return s[p:i+1]
+          for k in ['void CureWorker','void MinorWorker','void RWorker','UINT ReferenceSendInputsUnlocked','bool ReferenceTapKeyUnlocked']:
+            assert fn(a,k)==fn(b,k),k
+          assert 'std::array<int,4> skillDelayMs{1,1,1,1};' in b
+          assert 'void WsWorker()' in b and 'tWs(WsWorker)' in b
+          print('PRESERVATION=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'source/audit failed'}
+      - name: Build
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v484
+        run: |
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp /Fe:PremiumPlusCombo-Test.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT
+          if($LASTEXITCODE){throw 'test build failed'}
+          Copy-Item PremiumPlusCombo-Test.exe PremiumPlusCombo.exe
+      - name: Test
+        shell: pwsh
+        working-directory: premium_plus_combo_final/v484
+        run: |
+          foreach($arg in @('--self-test','--transport-observer-test','--attack-observer-test','--attack-z-off-observer-test','--cure-observer-test')){$p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList $arg -Wait -PassThru;if($p.ExitCode){throw "$arg failed"}}
+          $s=Get-Content self-test-report.txt -Raw;if($s -notmatch 'PASSED=172' -or $s -notmatch 'SkillDefaults_1=PASS'){throw 'self test mismatch'}
+          $a=Get-Content attack-observer-report.txt -Raw;foreach($x in @('RoundRobin=PASS','BarAssertion=PASS','WSNonBlocking=PASS','NoWSBacklog=PASS','WSTiming=PASS','Overlap=0','RESULT=PASS')){if($a -notmatch $x){throw "attack $x"}}
+          $span=[int](($a -split "`n"|?{$_ -like 'FastAttackSpanMs=*'}) -replace 'FastAttackSpanMs=','');if($span -ge 420){throw "attack slow $span"}
+          $c=Get-Content cure-observer-report.txt -Raw;if($c -notmatch 'RESULT=PASS' -or $c -notmatch 'Overlap=0'){throw 'cure regression'}
+          $sha=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash
+          @" 
+          Version=4.8.4.0
+          SourceSHA256=3A2DD16737D825DEAB01DE7AF55B1A3CCD81476AAD2A4B472D7AAEB1AD07FF0F
+          ReferenceV483=56A57C7A65F5A091BE9298F3388C82C4C4097392F96A17BD932E26DD00FCC839
+          ExistingStructurePreserved=PASS
+          CurePreserved=PASS
+          MinorPreserved=PASS
+          SkillDefaultMs=1
+          WSSchedulerNonBlocking=PASS
+          FastAttackSpanMs=$span
+          SelfTest=172/172 PASS
+          EXESHA256=$sha
+          "@ | Set-Content BUILD-INFO.txt
+          Get-Content attack-observer-report.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-v4.8.4-ATTACK-SPEED-CANDIDATE
+          path: |
+            premium_plus_combo_final/v484/PremiumPlusCombo.exe
+            premium_plus_combo_final/v484/main.cpp
+            premium_plus_combo_final/v484/BUILD-INFO.txt
+            premium_plus_combo_final/v484/self-test-report.txt
+            premium_plus_combo_final/v484/transport-observer-report.txt
+            premium_plus_combo_final/v484/attack-observer-report.txt
+            premium_plus_combo_final/v484/attack-z-off-observer-report.txt
+            premium_plus_combo_final/v484/cure-observer-report.txt
+          retention-days: 14
