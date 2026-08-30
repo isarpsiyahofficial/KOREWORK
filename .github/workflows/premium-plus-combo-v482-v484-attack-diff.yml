@@ -22,7 +22,7 @@ jobs:
           cs=sorted((r/'source'/'vnext_47').glob('c*.txt'))
           base=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in cs)))
           assert hashlib.sha256(base).hexdigest()=='e2598a67b26cb0efb4aea05ac4c329d9f4098fcdef645f2e6ef0d5a3ca0f1f07'
-          m=o/'work.cpp';m.write_bytes(base)
+          m=o/'main.cpp';m.write_bytes(base)
           for n,s in [('v47_to_v48.patch.gz.b64',0),('v48_observer_fix2.patch.gz.b64',0),('v481_to_v482.patch.gz.b64',1),('v482_to_v4821.patch.gz.b64',1),('v4821_to_v4822.patch.gz.b64',1)]:
             p=o/(n+'.patch');p.write_bytes(gzip.decompress(base64.b64decode((src/n).read_text().strip())));subprocess.run(['git','apply',f'-p{s}',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
           assert hashlib.sha256(m.read_bytes()).hexdigest()=='6e857a8a6ccd570d34348dd265ea63e57fe9d3240d9a05447b39a3794fe1cabb'
