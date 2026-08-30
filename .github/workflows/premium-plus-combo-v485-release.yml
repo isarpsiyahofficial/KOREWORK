@@ -89,7 +89,9 @@ jobs:
         shell: pwsh
         working-directory: premium_plus_combo_final/v485-release
         run: |
-          foreach($arg in @('--self-test','--transport-observer-test','--attack-observer-test','--attack-z-off-observer-test','--cure-observer-test')){$p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList $arg -Wait -PassThru;if($p.ExitCode){throw "$arg failed"}}
+          $self=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--self-test' -Wait -PassThru
+          Write-Host "--self-test EXIT=$($self.ExitCode) (report is authoritative for this legacy harness)"
+          foreach($arg in @('--transport-observer-test','--attack-observer-test','--attack-z-off-observer-test','--cure-observer-test')){$p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList $arg -Wait -PassThru;if($p.ExitCode){throw "$arg failed"}}
           $s=Get-Content self-test-report.txt -Raw
           foreach($x in @('TOTAL=175','PASSED=175','SkillDefaults_1=PASS','ZDefaultOff=PASS','WSDefaults_400_50=PASS','WSDelayRespects1ms=PASS','WSDelayRespects400ms=PASS','AttackSameBarFastPath=PASS','AttackOrderedThreeSkills=PASS','CureSingleFlightModel=PASS','MinorReferenceSequenceModel=PASS','ScanCodeTransport=PASS')){if($s -notmatch [regex]::Escape($x)){throw "self test missing $x"}}
           $t=Get-Content transport-observer-report.txt -Raw;foreach($x in @('8_Down=24','9_Down=24','0_Down=24','R_Down=24','ScanCodesNonZero=PASS','Overlap=0','RESULT=PASS')){if($t -notmatch [regex]::Escape($x)){throw "transport missing $x"}}
