@@ -1,0 +1,122 @@
+name: PremiumPlusCombo v4.8.8 W425 Known Good Audit
+on:
+  workflow_dispatch:
+  push:
+    branches: [premium-plus-combo-cure-attack-vitals-ws]
+    paths:
+      - '.github/workflows/premium-plus-combo-v488-w425-known-good-audit.yml'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with: {arch: x64}
+      - name: Reconstruct exact v4.8.8 baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force premium_plus_combo_final/w425-audit | Out-Null
+          @'
+          import base64,gzip,pathlib,hashlib,subprocess
+          r=pathlib.Path('premium_plus_combo_final');o=r/'w425-audit';src=r/'source'/'vnext_48';m=o/'main.cpp'
+          cs=sorted((r/'source'/'vnext_47').glob('c*.txt'));m.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in cs))))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='e2598a67b26cb0efb4aea05ac4c329d9f4098fcdef645f2e6ef0d5a3ca0f1f07'
+          for n,s in [('v47_to_v48.patch.gz.b64',0),('v48_observer_fix2.patch.gz.b64',0),('v481_to_v482.patch.gz.b64',1),('v482_to_v4821.patch.gz.b64',1),('v4821_to_v4822.patch.gz.b64',1)]:
+            p=o/(n+'.patch');p.write_bytes(gzip.decompress(base64.b64decode((src/n).read_text().strip())));subprocess.run(['git','apply',f'-p{s}',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='6e857a8a6ccd570d34348dd265ea63e57fe9d3240d9a05447b39a3794fe1cabb'
+          pcs=sorted(src.glob('v483_final_c*.txt'));p=o/'v483.patch';p.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in pcs))));subprocess.run(['git','apply','-p0',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='56a57c7a65f5a091be9298f3388c82c4c4097392f96a17bd932e26dd00fcc839'
+          pcs=sorted(src.glob('v483_to_v484_[0-9][0-9].b64'));p=o/'v484.patch';p.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in pcs))));subprocess.run(['git','apply','-p0',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='3a2dd16737d825deab01de7af55b1a3ccd81476aad2a4b472d7aaeb1ad07ff0f'
+          pcs=sorted(src.glob('v484_to_v485_[0-9][0-9].b64'));p=o/'v485.patch';p.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in pcs))));subprocess.run(['git','apply','-p0',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='916e2a370c5ed6eecf01e1ba1a3a79cab2dc45c703f781ff1189ecc711989e93'
+          p=o/'v486.patch';p.write_bytes(gzip.decompress(base64.b64decode((src/'v485_to_v486.patch.gz.b64').read_text().strip())));subprocess.run(['git','apply','--directory=premium_plus_combo_final/w425-audit','-p1',str(p)],check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='9320d8f6893ca478af35385c42ad2cdec1c9cc1b838b77e25840d352d9b23dd7'
+          p=o/'v488.patch';p.write_bytes(gzip.decompress(base64.b64decode((src/'v486_to_v488.patch.gz.b64').read_text().strip())));subprocess.run(['git','apply','-p1',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          sha=hashlib.sha256(m.read_bytes()).hexdigest();assert sha=='85d7804a4c287b796d651985c2f780a0c5c20c008737112c46696b90e1f561d0';print('ProductionSourceUntouched='+sha.upper())
+          # Create TEST-ONLY observer source. Production main.cpp remains byte-identical.
+          a=(o/'audit.cpp');t=m.read_text(encoding='utf-8')
+          old='a.skillEnabled={true,true,true,true};a.attackBars={1,2,3,4};a.slots={2,3,4,5};a.skillDelayMs={1,1,1,1};a.zCombo=true;a.wCombo=true;a.sCombo=true;a.wDelayMs=400;a.sDelayMs=50;'
+          new='a.skillEnabled={false,false,true,true};a.attackBars={1,1,2,2};a.slots={2,3,2,3};a.skillDelayMs={350,350,350,400};a.zCombo=false;a.wCombo=true;a.sCombo=false;a.wDelayMs=425;a.sDelayMs=425;'
+          assert t.count(old)==1;t=t.replace(old,new)
+          assert t.count('for(int i=0;i<4;i++){ExecuteAttack(a);WaitWsCycleCompletion(a);}')==1;t=t.replace('for(int i=0;i<4;i++){ExecuteAttack(a);WaitWsCycleCompletion(a);}','for(int i=0;i<2;i++){ExecuteAttack(a);WaitWsCycleCompletion(a);}')
+          marker="long long wAfterSkill=(skillAt&&wAt)?(long long)((wAt-skillAt+500)/1000):-1,sAfterW=(wAt&&sAt)?(long long)((sAt-wAt+500)/1000):-1;"
+          repl=marker+"ULONGLONG skill3At=g_observerFirstDownAt['3'].load();long long skill2To3=(skillAt&&skill3At)?(long long)((skill3At-skillAt+500)/1000):-1;"
+          assert t.count(marker)==1;t=t.replace(marker,repl)
+          out='f<<"WAfterSkillMs="<<wAfterSkill<<"\\n";'
+          assert t.count(out)==1;t=t.replace(out,'f<<"Skill2To3Ms="<<skill2To3<<"\\n";'+out)
+          a.write_text(t,encoding='utf-8',newline='\n')
+          '@ | python -
+          if($LASTEXITCODE){throw 'baseline reconstruction/audit source failed'}
+      - name: Build baseline and test-only audit
+        shell: pwsh
+        working-directory: premium_plus_combo_final/w425-audit
+        run: |
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp /Fe:Baseline-Test.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT
+          if($LASTEXITCODE){throw 'baseline build failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX audit.cpp /Fe:W425-Audit.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT
+          if($LASTEXITCODE){throw 'audit build failed'}
+          $p=Start-Process .\Baseline-Test.exe -ArgumentList '--self-test' -Wait -PassThru;if($p.ExitCode){throw 'baseline self-test failed'}
+          $s=Get-Content self-test-report.txt -Raw;if($s -notmatch 'TOTAL=176' -or $s -notmatch 'PASSED=176'){throw 'baseline regression'}
+      - name: Stress current screenshot timing 20x
+        shell: pwsh
+        working-directory: premium_plus_combo_final/w425-audit
+        run: |
+          $w=@();$gap=@();$hold=@();$ov=@()
+          1..20 | ForEach-Object {
+            $p=Start-Process .\W425-Audit.exe -ArgumentList '--attack-observer-test' -Wait -PassThru
+            $a=Get-Content attack-observer-report.txt -Raw
+            $wd=[int](($a -split "`n"|?{$_ -like 'W_Down=*'}) -replace 'W_Down=','')
+            $sd=[int](($a -split "`n"|?{$_ -like 'S_Down=*'}) -replace 'S_Down=','')
+            $k2=[int](($a -split "`n"|?{$_ -like 'Skill2_Down=*'}) -replace 'Skill2_Down=','')
+            $k3=[int](($a -split "`n"|?{$_ -like 'Skill3_Down=*'}) -replace 'Skill3_Down=','')
+            $f2=[int](($a -split "`n"|?{$_ -like 'F2_Down=*'}) -replace 'F2_Down=','')
+            $f1=[int](($a -split "`n"|?{$_ -like 'F1_Down=*'}) -replace 'F1_Down=','')
+            $over=[int](($a -split "`n"|?{$_ -like 'Overlap=*'}) -replace 'Overlap=','')
+            if($wd -ne 2 -or $sd -ne 0 -or $k2 -ne 1 -or $k3 -ne 1 -or $f2 -ne 2 -or $f1 -ne 2 -or $over -ne 0){throw "unexpected current-profile counts on run $_`n$a"}
+            $w += [int](($a -split "`n"|?{$_ -like 'WAfterSkillMs=*'}) -replace 'WAfterSkillMs=','')
+            $gap += [int](($a -split "`n"|?{$_ -like 'Skill2To3Ms=*'}) -replace 'Skill2To3Ms=','')
+            $hold += [int](($a -split "`n"|?{$_ -like 'W_HoldMs=*'}) -replace 'W_HoldMs=','')
+            $ov += $over
+          }
+          $wmin=($w|Measure-Object -Minimum).Minimum;$wmax=($w|Measure-Object -Maximum).Maximum;$wavg=[math]::Round(($w|Measure-Object -Average).Average,1)
+          $gmin=($gap|Measure-Object -Minimum).Minimum;$gmax=($gap|Measure-Object -Maximum).Maximum;$gavg=[math]::Round(($gap|Measure-Object -Average).Average,1)
+          $hmin=($hold|Measure-Object -Minimum).Minimum;$hmax=($hold|Measure-Object -Maximum).Maximum
+          if($wmin -lt 420 -or $wmax -gt 455){throw "W425 jitter too high $wmin-$wmax"}
+          if($hmin -lt 16){throw "W hold too short $hmin"}
+          @"
+          ProductionSourceSHA256=85D7804A4C287B796D651985C2F780A0C5C20C008737112C46696B90E1F561D0
+          ProductionCodeModified=NO
+          Profile=ScreenshotKnownGood
+          ActiveSkills=Skill3(F2/2,350ms),Skill4(F2/3,400ms)
+          LoopMs=1
+          RestoreBar=F1
+          Z=OFF
+          W=ON
+          WConfiguredMs=425
+          S=OFF
+          SFieldValueMs=425 (inactive)
+          Runs=20
+          WActualMinMs=$wmin
+          WActualMaxMs=$wmax
+          WActualAvgMs=$wavg
+          Skill3ToSkill4MinMs=$gmin
+          Skill3ToSkill4MaxMs=$gmax
+          Skill3ToSkill4AvgMs=$gavg
+          WHoldMinMs=$hmin
+          WHoldMaxMs=$hmax
+          Overlap=0
+          BaselineSelfTest=176/176 PASS
+          Recommendation=FREEZE_CURRENT_BEHAVIOR
+          "@ | Set-Content W425-KNOWN-GOOD-AUDIT.txt
+          Get-Content W425-KNOWN-GOOD-AUDIT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-v4.8.8-W425-KNOWN-GOOD-AUDIT
+          path: |
+            premium_plus_combo_final/w425-audit/W425-KNOWN-GOOD-AUDIT.txt
+            premium_plus_combo_final/w425-audit/self-test-report.txt
+          retention-days: 14
