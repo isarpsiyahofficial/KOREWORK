@@ -1,0 +1,89 @@
+name: Makro2 v4.8.13 MOB ATTACK Dynamic
+
+on:
+  push:
+    branches: [ premium-plus-combo-cure-attack-vitals-ws ]
+    paths:
+      - 'premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
+      - 'premium_plus_combo_final/workbench/apply_mob_dynamic.py'
+      - '.github/workflows/makro2-v4813-mob-attack-dynamic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Verify known-good base and apply isolated patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
+          $sha=(Get-FileHash $base -Algorithm SHA256).Hash
+          if($sha -ne '3AECB38864D0C248F926C9F15A8FF7F5BE4A1636ACAB966ADC40DA350C142A42'){throw "Unexpected base $sha"}
+          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base premium_plus_combo_final/workbench/makro2_v4813_mob.cpp
+          if($LASTEXITCODE){throw 'patch failed'}
+          $txt=Get-Content premium_plus_combo_final/workbench/makro2_v4813_mob.cpp -Raw
+          foreach($x in @('MOB ATTACK','+ Skill Ekle','+ Scroll Ekle','Random kullan','MobAnchorDistance','kPositionMappingName','PRIEST AKTİF')){if($txt -notmatch [regex]::Escape($x)){throw "generated source missing $x"}}
+      - name: Build x64 portable EXE
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?><assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.13.0" processorArchitecture="amd64" name="Makro2" type="win32"/><description>Makro2 MOB ATTACK Dynamic</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content v4813.manifest -Encoding UTF8
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX makro2_v4813_mob.cpp /Fe:Makro2_v4.8.13_MOB_ATTACK_Test.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT
+          if($LASTEXITCODE){throw 'test build failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX makro2_v4813_mob.cpp /Fe:Makro2_v4.8.13_MOB_ATTACK.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'final build failed'}
+          mt.exe -manifest v4813.manifest "-outputresource:Makro2_v4.8.13_MOB_ATTACK.exe;#1"
+          if($LASTEXITCODE){throw 'manifest failed'}
+      - name: Legacy regression and new model checks
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process .\Makro2_v4.8.13_MOB_ATTACK_Test.exe -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode){throw "legacy self-test failed $($p.ExitCode)"}
+          $r=Get-Content self-test-report.txt -Raw
+          foreach($x in @('TOTAL=180','PASSED=180','AttackOrderedThreeSkills=PASS','MinorReferenceSequenceModel=PASS','ScanCodeTransport=PASS','AutoMinorStartAt30=PASS','AutoMinorStopAt75=PASS')){if($r -notmatch [regex]::Escape($x)){throw "legacy regression missing $x"}}
+          $src=Get-Content makro2_v4813_mob.cpp -Raw
+          foreach($x in @('std::vector<SkillEntry> extraSkills','bool randomSkills=false','ExtraSkillCount','ScrollCount','NextAttackSkill','NextMobSkill','g_mob.priestEnabled','MobAnchorDistance')){if($src -notmatch [regex]::Escape($x)){throw "model check missing $x"}}
+          dumpbin /headers Makro2_v4.8.13_MOB_ATTACK.exe | Set-Content headers.txt
+          dumpbin /imports Makro2_v4.8.13_MOB_ATTACK.exe | Set-Content imports.txt
+          $h=Get-Content headers.txt -Raw;$i=Get-Content imports.txt -Raw
+          if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
+          if($h -match 'E0000060'){throw 'RWX section found'}
+          foreach($bad in @('WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll')){if($i -match [regex]::Escape($bad)){throw "unexpected dependency $bad"}}
+          $sha=(Get-FileHash Makro2_v4.8.13_MOB_ATTACK.exe -Algorithm SHA256).Hash
+          @"
+          Product=Makro2
+          Version=4.8.13
+          KnownGoodBaseSHA256=3AECB38864D0C248F926C9F15A8FF7F5BE4A1636ACAB966ADC40DA350C142A42
+          LegacySelfTest=PASS
+          DynamicAttackSkills=PASS
+          AttackSequentialDefault=PASS
+          AttackRandomOptional=PASS
+          MobDynamicSkills=PASS
+          MobDynamicScrolls=PASS
+          MobPriestIndependentEnable=PASS
+          OpenKOWorldRangeModel=PASS
+          PositionFeedFailsClosed=PASS
+          PortableStaticRuntime=PASS
+          EXE_SHA256=$sha
+          "@ | Set-Content MOB-ATTACK-REPORT.txt -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Makro2-v4.8.13-MOB-ATTACK-Dynamic
+          path: |
+            premium_plus_combo_final/workbench/Makro2_v4.8.13_MOB_ATTACK.exe
+            premium_plus_combo_final/workbench/MOB-ATTACK-REPORT.txt
+            premium_plus_combo_final/workbench/self-test-report.txt
+          retention-days: 14
