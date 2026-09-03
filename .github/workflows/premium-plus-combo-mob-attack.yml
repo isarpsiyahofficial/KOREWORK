@@ -31,12 +31,24 @@ jobs:
           o=pathlib.Path('premium_plus_combo_final/final-build-mob/main.cpp')
           parts=sorted(p.glob('part*.txt'))
           if len(parts)!=6: raise SystemExit(f'expected 6 chunks, got {len(parts)}')
-          raw=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in parts)))
-          o.write_bytes(raw)
+          packed=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in parts)))
+          packed_sha=hashlib.sha256(packed).hexdigest()
+          if packed_sha!='90ef9212221726a43bac3c5e5c75fd469191cbb9ff09bbe7d0e291afefb08c8d':
+              raise SystemExit('packed MOB ATTACK source SHA mismatch: '+packed_sha)
+          text=packed.decode('utf-8')
+          old1='g_layoutClientW=std::max(1,cr.right);g_layoutClientH=std::max(1,cr.bottom);'
+          new1='g_layoutClientW=std::max<int>(1,(int)cr.right);g_layoutClientH=std::max<int>(1,(int)cr.bottom);'
+          old2='int cw=std::max(1,cr.right),ch=std::max(1,cr.bottom);'
+          new2='int cw=std::max<int>(1,(int)cr.right),ch=std::max<int>(1,(int)cr.bottom);'
+          if old1 not in text or old2 not in text: raise SystemExit('responsive LONG/int patch anchor missing')
+          text=text.replace(old1,new1,1).replace(old2,new2,1)
+          raw=text.encode('utf-8')
           got=hashlib.sha256(raw).hexdigest()
-          print('SourceSHA256='+got)
-          if got!='90ef9212221726a43bac3c5e5c75fd469191cbb9ff09bbe7d0e291afefb08c8d':
-              raise SystemExit('MOB ATTACK source SHA mismatch')
+          print('PackedSourceSHA256='+packed_sha)
+          print('BuildSourceSHA256='+got)
+          if got!='110fb87c6b79f41568caa967b4916b9dae0cba3df4d326bbb502e66928bf2898':
+              raise SystemExit('patched MOB ATTACK source SHA mismatch')
+          o.write_bytes(raw)
           '@ | python -
           if($LASTEXITCODE){throw 'reconstruction failed'}
           $c=Get-Content premium_plus_combo_final/final-build-mob/main.cpp -Raw
@@ -155,7 +167,8 @@ jobs:
           Product=PremiumPlusCombo
           Version=4.4.0.0
           PreservedWorkingBaseCommit=BA581221BBCB9002B73C0A6E47EC8A2FA0F0D7C6
-          SourceSHA256=90EF9212221726A43BAC3C5E5C75FD469191CBB9FF09BBE7D0E291AFEFb08C8D
+          PackedSourceSHA256=90EF9212221726A43BAC3C5E5C75FD469191CBB9FF09BBE7D0E291AFEFb08C8D
+          SourceSHA256=110FB87C6B79F41568CAA967B4916B9DAE0CBA3DF4D326BBB502E66928BF2898
           Manifest=requireAdministrator
           DpiAwareness=PerMonitorV2
           UI=RESPONSIVE_640x500_PLUS_ALL_CHILDREN
