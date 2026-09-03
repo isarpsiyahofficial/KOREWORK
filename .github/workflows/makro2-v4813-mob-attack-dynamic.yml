@@ -6,6 +6,7 @@ on:
     paths:
       - 'premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
       - 'premium_plus_combo_final/workbench/apply_mob_dynamic.py'
+      - 'premium_plus_combo_final/workbench/post_mob_dynamic_fix.py'
       - '.github/workflows/makro2-v4813-mob-attack-dynamic.yml'
   workflow_dispatch:
 
@@ -36,17 +37,8 @@ jobs:
           if($LASTEXITCODE){throw 'known-good base verification failed'}
           python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base premium_plus_combo_final/workbench/makro2_v4813_mob.cpp
           if($LASTEXITCODE){throw 'patch failed'}
-          @'
-          import pathlib
-          p=pathlib.Path('premium_plus_combo_final/workbench/makro2_v4813_mob.cpp')
-          s=p.read_text(encoding='utf-8')
-          anchor='unsigned NextPseudoRandom(unsigned n,std::atomic<int>&last)'
-          compat="int NextEnabledSkill(const AttackSettings& a){int enabled[4]{},n=0;for(int i=0;i<4;i++)if(a.skillEnabled[i])enabled[n++]=i;if(!n)return -1;unsigned turn=g_skillTurn.fetch_add(1,std::memory_order_relaxed);return enabled[turn%(unsigned)n];}\n"
-          assert s.count(anchor)==1
-          s=s.replace(anchor,compat+anchor,1)
-          p.write_text(s,encoding='utf-8',newline='\n')
-          '@ | python -
-          if($LASTEXITCODE){throw 'legacy selector compatibility patch failed'}
+          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py premium_plus_combo_final/workbench/makro2_v4813_mob.cpp
+          if($LASTEXITCODE){throw 'post patch failed'}
           $txt=Get-Content premium_plus_combo_final/workbench/makro2_v4813_mob.cpp -Raw
           foreach($x in @('MOB ATTACK','+ Skill Ekle','+ Scroll Ekle','Random kullan','MobAnchorDistance','kPositionMappingName','PRIEST AKTİF','NextEnabledSkill')){if($txt -notmatch [regex]::Escape($x)){throw "generated source missing $x"}}
       - name: Build x64 portable EXE
