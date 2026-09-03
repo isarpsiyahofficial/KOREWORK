@@ -1,0 +1,60 @@
+name: Makro2 Export Exact v4.8.11 Source
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: premium-plus-combo-cure-attack-vitals-ws
+      - name: Reconstruct exact v4.8.11
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force premium_plus_combo_final/workbench | Out-Null
+          @'
+          import base64,gzip,pathlib,hashlib,subprocess,shutil
+          r=pathlib.Path('premium_plus_combo_final');o=r/'workbench'/'reconstruct';o.mkdir(parents=True,exist_ok=True);src=r/'source'/'vnext_48';m=o/'main.cpp'
+          cs=sorted((r/'source'/'vnext_47').glob('c*.txt'))
+          m.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in cs))))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='e2598a67b26cb0efb4aea05ac4c329d9f4098fcdef645f2e6ef0d5a3ca0f1f07'
+          for n,s in [('v47_to_v48.patch.gz.b64',0),('v48_observer_fix2.patch.gz.b64',0),('v481_to_v482.patch.gz.b64',1),('v482_to_v4821.patch.gz.b64',1),('v4821_to_v4822.patch.gz.b64',1)]:
+            p=o/(n+'.patch');p.write_bytes(gzip.decompress(base64.b64decode((src/n).read_text().strip())));subprocess.run(['git','apply',f'-p{s}',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='6e857a8a6ccd570d34348dd265ea63e57fe9d3240d9a05447b39a3794fe1cabb'
+          pcs=sorted(src.glob('v483_final_c*.txt'));p=o/'v483.patch';p.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in pcs))));subprocess.run(['git','apply','-p0',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='56a57c7a65f5a091be9298f3388c82c4c4097392f96a17bd932e26dd00fcc839'
+          pcs=sorted(src.glob('v483_to_v484_[0-9][0-9].b64'));p=o/'v484.patch';p.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in pcs))));subprocess.run(['git','apply','-p0',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='3a2dd16737d825deab01de7af55b1a3ccd81476aad2a4b472d7aaeb1ad07ff0f'
+          pcs=sorted(src.glob('v484_to_v485_[0-9][0-9].b64'));p=o/'v485.patch';p.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in pcs))));subprocess.run(['git','apply','-p0',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='916e2a370c5ed6eecf01e1ba1a3a79cab2dc45c703f781ff1189ecc711989e93'
+          p=o/'v486.patch';p.write_bytes(gzip.decompress(base64.b64decode((src/'v485_to_v486.patch.gz.b64').read_text().strip())));subprocess.run(['git','apply','--directory=premium_plus_combo_final/workbench/reconstruct','-p1',str(p)],check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='9320d8f6893ca478af35385c42ad2cdec1c9cc1b838b77e25840d352d9b23dd7'
+          p=o/'v488.patch';p.write_bytes(gzip.decompress(base64.b64decode((src/'v486_to_v488.patch.gz.b64').read_text().strip())));subprocess.run(['git','apply','-p1',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='85d7804a4c287b796d651985c2f780a0c5c20c008737112c46696b90e1f561d0'
+          p=o/'v4810.patch';p.write_bytes(gzip.decompress(base64.b64decode((src/'v488_to_v4810_category_only.patch.gz.b64').read_text().strip())));subprocess.run(['git','apply','-p1',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          assert hashlib.sha256(m.read_bytes()).hexdigest()=='4036e2d93d2305c1acea7b5e36a06ee6a4b3b4de6594afdfa778bd5bafe8323e'
+          pcs=sorted(src.glob('v4810_to_v4811_[0-9][0-9].b64'));assert len(pcs)==2
+          p=o/'v4811.patch';p.write_bytes(gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in pcs))));subprocess.run(['git','apply','-p1',p.name],cwd=o,check=True);m.write_bytes(m.read_bytes().replace(b'\r\n',b'\n'))
+          sha=hashlib.sha256(m.read_bytes()).hexdigest();assert sha=='3aecb38864d0c248f926c9f15a8ff7f5be4a1636acab966adc40da350c142a42',sha
+          out=r/'workbench'/'makro2_v4811_exact.cpp';shutil.copyfile(m,out)
+          (r/'workbench'/'SOURCE_SHA256.txt').write_text(sha.upper()+'\n')
+          print('SOURCE_EXPORT=PASS '+sha.upper())
+          '@ | python -
+          if($LASTEXITCODE){throw 'source export failed'}
+      - name: Commit verified workbench source
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add premium_plus_combo_final/workbench/makro2_v4811_exact.cpp premium_plus_combo_final/workbench/SOURCE_SHA256.txt
+          git diff --cached --quiet
+          if($LASTEXITCODE -ne 0){
+            git commit -m "Export verified Makro2 v4.8.11 source workbench"
+            git push origin HEAD:premium-plus-combo-cure-attack-vitals-ws
+          }
