@@ -25,10 +25,10 @@ once('constexpr wchar_t kTitle[] = L"Premium Plus Combo | v4.8.18";', 'constexpr
 # HP/MP: preserve the existing pixel-analysis model, but collect a bounded sparse raster
 # using GetPixel instead of bulk BitBlt/GetDIBits desktop capture.
 replace_fn('static BarReading CaptureBarReading(const NormalizedRect&r,bool hp)', r'''static BarReading CaptureBarReading(const NormalizedRect&r,bool hp){
-  BarReading out;if(!r.valid())return out;RECT q=Denorm(r);int w=q.right-q.left,h=q.bottom-q.top;if(w<8||h<3||w>2400||h>600)return out;
+  BarReading out;if(!r.valid())return out;RECT q=Denorm(r);int w=(int)(q.right-q.left),h=(int)(q.bottom-q.top);if(w<8||h<3||w>2400||h>600)return out;
   const int sw=std::clamp(w,8,420),sh=std::clamp(h,3,64);std::vector<uint32_t> px((size_t)sw*sh);
   HDC dc=GetDC(nullptr);if(!dc)return out;int bad=0;
-  for(int y=0;y<sh;y++){int sy=q.top+(int)(((long long)(2*y+1)*h)/(2*sh));sy=std::clamp(sy,q.top,q.bottom-1);for(int x=0;x<sw;x++){int sx=q.left+(int)(((long long)(2*x+1)*w)/(2*sw));sx=std::clamp(sx,q.left,q.right-1);COLORREF c=GetPixel(dc,sx,sy);if(c==CLR_INVALID){bad++;c=RGB(0,0,0);}px[(size_t)y*sw+x]=(uint32_t)GetBValue(c)|((uint32_t)GetGValue(c)<<8)|((uint32_t)GetRValue(c)<<16);}}
+  for(int y=0;y<sh;y++){int sy=(int)q.top+(int)(((long long)(2*y+1)*h)/(2*sh));sy=std::clamp<int>(sy,(int)q.top,(int)q.bottom-1);for(int x=0;x<sw;x++){int sx=(int)q.left+(int)(((long long)(2*x+1)*w)/(2*sw));sx=std::clamp<int>(sx,(int)q.left,(int)q.right-1);COLORREF c=GetPixel(dc,sx,sy);if(c==CLR_INVALID){bad++;c=RGB(0,0,0);}px[(size_t)y*sw+x]=(uint32_t)GetBValue(c)|((uint32_t)GetGValue(c)<<8)|((uint32_t)GetRValue(c)<<16);}}
   ReleaseDC(nullptr,dc);if(bad>(sw*sh)/8)return out;return AnalyzeBarPixels(px,sw,sh,hp);
 }''')
 
@@ -40,12 +40,12 @@ replace_fn('bool CaptureGameClient(HWND game,std::vector<uint32_t>&px,int&w,int&
 # to real screen coordinates. No full-window screenshot is created.
 replace_fn('bool FindInventoryGrid(HWND game,InventoryGrid&grid)', r'''bool FindInventoryGrid(HWND game,InventoryGrid&grid){
   grid={};if(!game||!IsWindow(game))return false;RECT cr{};if(!GetClientRect(game,&cr))return false;POINT origin{0,0};if(!ClientToScreen(game,&origin))return false;
-  const int W=cr.right-cr.left,H=cr.bottom-cr.top;if(W<640||H<420)return false;
+  const int W=(int)(cr.right-cr.left),H=(int)(cr.bottom-cr.top);if(W<640||H<420)return false;
   const int cropL=W*70/100,cropR=W*995/1000,cropT=H*48/100,cropB=H*86/100;if(cropR-cropL<220||cropB-cropT<150)return false;
   int step=2;while(((cropR-cropL+step-1)/step)*((cropB-cropT+step-1)/step)>42000&&step<5)step++;
   const int sw=(cropR-cropL+step-1)/step,sh=(cropB-cropT+step-1)/step;if(sw<80||sh<60)return false;
   std::vector<uint8_t> g((size_t)sw*sh);HDC dc=GetDC(nullptr);if(!dc)return false;int bad=0;
-  for(int y=0;y<sh;y++){int py=origin.y+std::min(cropB-1,cropT+y*step);for(int x=0;x<sw;x++){int px=origin.x+std::min(cropR-1,cropL+x*step);COLORREF c=GetPixel(dc,px,py);if(c==CLR_INVALID){bad++;c=RGB(0,0,0);}int rr=GetRValue(c),gg=GetGValue(c),bb=GetBValue(c);g[(size_t)y*sw+x]=(uint8_t)((rr*77+gg*150+bb*29)>>8);}}
+  for(int y=0;y<sh;y++){int py=(int)origin.y+std::min(cropB-1,cropT+y*step);for(int x=0;x<sw;x++){int px=(int)origin.x+std::min(cropR-1,cropL+x*step);COLORREF c=GetPixel(dc,px,py);if(c==CLR_INVALID){bad++;c=RGB(0,0,0);}int rr=GetRValue(c),gg=GetGValue(c),bb=GetBValue(c);g[(size_t)y*sw+x]=(uint8_t)((rr*77+gg*150+bb*29)>>8);}}
   ReleaseDC(nullptr,dc);if(bad>(sw*sh)/12)return false;
   std::vector<double> vx((size_t)sw-1),hy((size_t)sh-1),vs(vx.size()),hs(hy.size());
   for(int x=1;x<sw;x++){double sum=0;for(int y=0;y<sh;y++)sum+=std::abs((int)g[(size_t)y*sw+x]-(int)g[(size_t)y*sw+x-1]);vx[(size_t)x-1]=sum/sh;}
