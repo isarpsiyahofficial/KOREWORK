@@ -1,0 +1,33 @@
+name: Export Makro2 v4.8.14 Generated Source
+
+on:
+  push:
+    branches: [ ui-compact-v4815-work ]
+    paths:
+      - '.github/workflows/makro2-export-v4814-generated.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate current source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
+          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base premium_plus_combo_final/workbench/makro2_v4814_full.cpp
+          if($LASTEXITCODE){throw 'MOB patch failed'}
+          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py premium_plus_combo_final/workbench/makro2_v4814_full.cpp
+          if($LASTEXITCODE){throw 'post patch failed'}
+          python premium_plus_combo_final/workbench/post_mob_r_chase.py premium_plus_combo_final/workbench/makro2_v4814_full.cpp
+          if($LASTEXITCODE){throw 'R chase patch failed'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Makro2-v4814-generated-source
+          path: premium_plus_combo_final/workbench/makro2_v4814_full.cpp
+          retention-days: 1
