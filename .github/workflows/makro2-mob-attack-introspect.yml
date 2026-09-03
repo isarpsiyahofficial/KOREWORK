@@ -1,0 +1,57 @@
+name: Makro2 MOB ATTACK Source Introspection
+
+on:
+  push:
+    branches: [ premium-plus-combo-cure-attack-vitals-ws ]
+    paths:
+      - '.github/workflows/makro2-mob-attack-introspect.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct exact v4.8.12 source and inspect extension points
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import base64,gzip,pathlib,hashlib,re
+          root=pathlib.Path('premium_plus_combo_final/source/vnext_48')
+          parts=sorted(root.glob('v4812_final_c*.txt'))
+          assert len(parts)==3, parts
+          encoded=''.join(p.read_text().strip() for p in parts)
+          raw=gzip.decompress(base64.b64decode(encoded))
+          sha=hashlib.sha256(raw).hexdigest()
+          print('V4812_FINAL_SOURCE_SHA256='+sha.upper())
+          assert sha=='4b101cf5e09c54e3f48604033cd4ddb961e022737b7b14a1ce63529d58097875', sha
+          out=pathlib.Path('makro2-v4812-main.cpp')
+          out.write_bytes(raw)
+          text=raw.decode('utf-8')
+          keys=[
+            'struct Settings','struct AppState','LRESULT CALLBACK WndProc','WM_SIZE',
+            'CreateWindow','CreateWindowEx','ReadAttackUi','SaveAttack','AttackWorker','ExecuteAttack',
+            'CaptureBarReading','CaptureHpReadingSmart','AnalyzeBarPixels','OverlayProc',
+            'CureWorker','ReferenceTapKey','DirectTimedTapUnlocked','autoMinorSlotEnabled',
+            'ROGUE AKTIF','ATTACK AKTIF','IDC_ATTACK','attackEnabled'
+          ]
+          lines=text.splitlines()
+          for key in keys:
+            hits=[i for i,l in enumerate(lines) if key in l]
+            print(f'===== KEY {key} HITS {len(hits)} =====')
+            for i in hits[:4]:
+              a=max(0,i-12);b=min(len(lines),i+36)
+              print(f'--- {a+1}:{b} ---')
+              for n in range(a,b): print(f'{n+1:05d}: {lines[n]}')
+          print('INTROSPECTION=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'source introspection failed'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: makro2-v4812-exact-source
+          path: makro2-v4812-main.cpp
+          retention-days: 2
