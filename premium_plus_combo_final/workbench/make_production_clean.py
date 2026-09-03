@@ -14,6 +14,7 @@ test_switches = [
     ('--auto-minor-observer-test', 'RunAutoMinorObserverTest()?0:9'),
     ('--cure-observer-test', 'RunCureObserverTest()?0:7'),
     ('--mob-model-test', 'RunMobModelTest()?0:10'),
+    ('--warrior-model-test', 'RunWarriorModelTest()?0:11'),
 ]
 for sw, ret in test_switches:
     exact = f'if(cmd&&wcsstr(cmd,L"{sw}"))return {ret};'
@@ -44,10 +45,6 @@ s = s[:start] + 'bool ReadPosition(double&,double&){return false;}' + s[end:]
 
 # Remove the sole production cleanup call to the unused optional position mapping.
 s = s.replace('ClosePositionBridge();CloseBridge();', 'CloseBridge();', 1)
-
-# Build identity only; runtime logic remains the same.
-s = s.replace('constexpr wchar_t kTitle[] = L"Premium Plus Combo - Rogue";',
-              'constexpr wchar_t kTitle[] = L"Premium Plus Combo - Rogue | v4.8.14";', 1)
 
 # Guardrails: no test dispatch should remain in production source.
 for sw, _ in test_switches:
