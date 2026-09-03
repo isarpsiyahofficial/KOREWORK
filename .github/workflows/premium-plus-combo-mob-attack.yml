@@ -1,0 +1,193 @@
+name: PremiumPlusCombo MOB ATTACK Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/mob-attack-20260903]
+    paths:
+      - 'premium_plus_combo_final/source/mob_attack_parts/**'
+      - '.github/workflows/premium-plus-combo-mob-attack.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Reconstruct and audit MOB ATTACK source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force premium_plus_combo_final/final-build-mob | Out-Null
+          @'
+          import base64,gzip,pathlib,hashlib
+          p=pathlib.Path('premium_plus_combo_final/source/mob_attack_parts')
+          o=pathlib.Path('premium_plus_combo_final/final-build-mob/main.cpp')
+          parts=sorted(p.glob('part*.txt'))
+          if len(parts)!=6: raise SystemExit(f'expected 6 chunks, got {len(parts)}')
+          raw=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in parts)))
+          o.write_bytes(raw)
+          got=hashlib.sha256(raw).hexdigest()
+          print('SourceSHA256='+got)
+          if got!='90ef9212221726a43bac3c5e5c75fd469191cbb9ff09bbe7d0e291afefb08c8d':
+              raise SystemExit('MOB ATTACK source SHA mismatch')
+          '@ | python -
+          if($LASTEXITCODE){throw 'reconstruction failed'}
+          $c=Get-Content premium_plus_combo_final/final-build-mob/main.cpp -Raw
+          foreach($n in @('BuildMinorBatch','PublishBridgeInputs','ReferenceTapKey','MobGeneralWorker','PriestWorker','MobVisualMatches','LearnMobSignature','WorldDistance','PositionSharedState','ApplyResponsiveLayout','IDC_CATEGORY_MOB','g_mobTargetLocked','CaptureHpColor','PremiumPlusCombo\\MobAttackV1')) { if(-not $c.Contains($n)){throw "missing behavior: $n"} }
+          foreach($b in @('Gdiplus','g_rightImage','g_leftImage','LoadImageRes','CreateProcess','VirtualProtect')) { if($c.Contains($b)){throw "obsolete/forbidden: $b"} }
+          @'
+          #include <windows.h>
+          1 VERSIONINFO
+           FILEVERSION 4,4,0,0
+           PRODUCTVERSION 4,4,0,0
+           FILEFLAGSMASK 0x3fL
+           FILEFLAGS 0
+           FILEOS 0x40004L
+           FILETYPE 0x1L
+          BEGIN
+           BLOCK "StringFileInfo"
+           BEGIN
+            BLOCK "041F04E6"
+            BEGIN
+             VALUE "FileDescription", "Premium Plus Combo - Rogue / Attack / Mob Attack\0"
+             VALUE "FileVersion", "4.4.0.0\0"
+             VALUE "ProductName", "Premium Plus Combo\0"
+             VALUE "ProductVersion", "4.4.0.0\0"
+            END
+           END
+           BLOCK "VarFileInfo"
+           BEGIN
+            VALUE "Translation", 0x041F, 1254
+           END
+          END
+          '@ | Set-Content premium_plus_combo_final/final-build-mob/app.rc -Encoding Ascii
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="1.0.0.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"/>
+            <description>Premium Plus Combo</description>
+            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+              <security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security>
+            </trustInfo>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3">
+              <windowsSettings>
+                <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+                <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+              </windowsSettings>
+            </application>
+            <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+              <application>
+                <supportedOS Id="{4f476546-937f-4a47-9aa8-1d328b35c7ad}"/>
+                <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+              </application>
+            </compatibility>
+          </assembly>
+          '@ | Set-Content premium_plus_combo_final/final-build-mob/final.manifest -Encoding UTF8
+
+      - name: Build test and final x64 EXEs
+        shell: pwsh
+        working-directory: premium_plus_combo_final/final-build-mob
+        run: |
+          $ErrorActionPreference='Stop'
+          rc /nologo app.rc; if($LASTEXITCODE){throw 'rc failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo-Test.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+          if($LASTEXITCODE){throw 'test cl failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX main.cpp app.res /Fe:PremiumPlusCombo.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'final cl failed'}
+          mt.exe -manifest final.manifest "-outputresource:PremiumPlusCombo.exe;#1"
+          if($LASTEXITCODE){throw 'manifest embed failed'}
+
+      - name: Run behavior and MOB ATTACK self-tests
+        shell: pwsh
+        working-directory: premium_plus_combo_final/final-build-mob
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process .\PremiumPlusCombo-Test.exe -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode){Get-Content self-test-report.txt -ErrorAction SilentlyContinue; throw "self-test exit $($p.ExitCode)"}
+          $r=Get-Content self-test-report.txt -Raw
+          if($r -notmatch 'TOTAL=146' -or $r -notmatch 'PASSED=146' -or $r -match '=FAIL'){Get-Content self-test-report.txt;throw 'self-test failed'}
+          foreach($n in @('BridgeAllKeyboardRouting=PASS','MinorReferenceSequenceModel=PASS','AttackPerSkillBarSlotSequence=PASS','MobWorldDistanceMeters=PASS','MobVisualSignatureExactMatch=PASS','MobGeneralPriestIndependent=PASS','MobDefaultRange45Meters=PASS','MobScrollTwoMinutes=PASS','MobScrollThirtyMinutes=PASS','MobQZKeyboardRouting=PASS','PositionBridgeABI=PASS')) { if($r -notmatch [regex]::Escape($n)){throw "missing test: $n"} }
+          Get-Content self-test-report.txt | Select-Object -Last 18
+
+      - name: Verify manifest, architecture and imports
+        shell: pwsh
+        working-directory: premium_plus_combo_final/final-build-mob
+        run: |
+          $ErrorActionPreference='Stop'
+          mt.exe "-inputresource:PremiumPlusCombo.exe;#1" -out:embedded.manifest
+          if($LASTEXITCODE){throw 'manifest extraction failed'}
+          $m=Get-Content embedded.manifest -Raw
+          foreach($must in @('requireAdministrator','PerMonitorV2','true/pm','processorArchitecture="amd64"')) { if($m -notmatch [regex]::Escape($must)){throw "manifest missing $must"} }
+          if($m -match 'level="asInvoker"'){throw 'asInvoker leaked into final manifest'}
+          dumpbin /headers PremiumPlusCombo.exe | Set-Content headers.txt
+          dumpbin /imports PremiumPlusCombo.exe | Set-Content imports.txt
+          $h=Get-Content headers.txt -Raw; $i=Get-Content imports.txt -Raw
+          if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
+          foreach($b in @('gdiplus.dll','WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll')) { if($i -match [regex]::Escape($b)){throw "unexpected import $b"} }
+          if($h -match 'E0000060'){throw 'RWX section'}
+
+      - name: Microsoft Defender final EXE
+        shell: pwsh
+        working-directory: premium_plus_combo_final/final-build-mob
+        run: |
+          $ErrorActionPreference='Stop'
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(-not(Test-Path $mp)){$mp=Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform" -Directory|Sort-Object Name -Descending|%{Join-Path $_.FullName 'MpCmdRun.exe'}|?{Test-Path $_}|Select-Object -First 1}
+          if(-not $mp){throw 'Defender unavailable'}
+          & $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo.exe) -DisableRemediation
+          if($LASTEXITCODE){throw "Defender $LASTEXITCODE"}
+          'DefenderScan=PASS' | Set-Content defender-scan.txt
+
+      - name: Create MOB ATTACK build report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/final-build-mob
+        run: |
+          $sha=(Get-FileHash PremiumPlusCombo.exe -Algorithm SHA256).Hash
+          $size=(Get-Item PremiumPlusCombo.exe).Length
+          @"
+          Product=PremiumPlusCombo
+          Version=4.4.0.0
+          PreservedWorkingBaseCommit=BA581221BBCB9002B73C0A6E47EC8A2FA0F0D7C6
+          SourceSHA256=90EF9212221726A43BAC3C5E5C75FD469191CBB9FF09BBE7D0E291AFEFb08C8D
+          Manifest=requireAdministrator
+          DpiAwareness=PerMonitorV2
+          UI=RESPONSIVE_640x500_PLUS_ALL_CHILDREN
+          MobAttack=GENERAL_PRIEST_INDEPENDENT_SHARED_HOTKEY
+          MobSelection=NAME_SIGNATURE_TWO_FRAME_PLUS_HP
+          WrongTarget=OPTIONAL_Z_THEN_Q_RESCAN
+          ScrollTimeline=FOUR_INDEPENDENT_TIMERS
+          PriestHeal=THRESHOLD_EDGE_SINGLE_CAST_REARM_PLUS3
+          PriestCure=RED_BASELINE_THREE_PURPLE_FRAMES
+          Range=TRUE_XZ_EUCLIDEAN_WITH_4M_GUARD_FAILSAFE_NO_POSITION
+          PositionFeed=OPTIONAL_SHARED_MEMORY_PUBLISHER_REQUIRED_FOR_AUTOMOVE
+          ExistingAttack=WAITS_FOR_MOB_TARGET_LOCK_WHEN_GENERAL_ENABLED
+          Minor062F=SOURCE_PATH_PRESERVED_AND_SELFTESTED
+          SelfTest=146/146 PASS
+          DefenderScan=PASS
+          SHA256=$sha
+          Size=$size
+          RealGameVerification=USER_SIDE_REQUIRED
+          "@ | Set-Content BUILD-INFO.txt
+          Get-Content BUILD-INFO.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-MOB-ATTACK-x64
+          path: |
+            premium_plus_combo_final/final-build-mob/PremiumPlusCombo.exe
+            premium_plus_combo_final/final-build-mob/main.cpp
+            premium_plus_combo_final/final-build-mob/final.manifest
+            premium_plus_combo_final/final-build-mob/embedded.manifest
+            premium_plus_combo_final/final-build-mob/BUILD-INFO.txt
+            premium_plus_combo_final/final-build-mob/self-test-report.txt
+            premium_plus_combo_final/final-build-mob/defender-scan.txt
+            premium_plus_combo_final/final-build-mob/imports.txt
+            premium_plus_combo_final/final-build-mob/headers.txt
+          retention-days: 14
