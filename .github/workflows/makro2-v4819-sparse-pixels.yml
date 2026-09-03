@@ -1,0 +1,216 @@
+name: Premium Plus Combo v4.8.19 Sparse Pixels
+
+on:
+  push:
+    branches: [ warrior-v4819-sparse-pixels ]
+    paths:
+      - 'premium_plus_combo_final/workbench/post_sparse_pixel_capture.py'
+      - '.github/workflows/makro2-v4819-sparse-pixels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-scan:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Generate v4.8.19 source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
+          @'
+          import pathlib,hashlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/makro2_v4811_exact.cpp')
+          b=p.read_bytes().replace(b'\r\n',b'\n')
+          sha=hashlib.sha256(b).hexdigest().upper()
+          print('BASE_SHA256='+sha)
+          assert sha=='3AECB38864D0C248F926C9F15A8FF7F5BE4A1636ACAB966ADC40DA350C142A42'
+          '@ | python -
+          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base premium_plus_combo_final/workbench/v4819_full.cpp
+          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py premium_plus_combo_final/workbench/v4819_full.cpp
+          python premium_plus_combo_final/workbench/post_mob_r_chase.py premium_plus_combo_final/workbench/v4819_full.cpp
+          python premium_plus_combo_final/workbench/post_ui_compact_tabs.py premium_plus_combo_final/workbench/v4819_full.cpp
+          Copy-Item premium_plus_combo_final/workbench/v4819_full.cpp premium_plus_combo_final/workbench/v4815_baseline.cpp
+          python premium_plus_combo_final/workbench/post_warrior_rightclick.py premium_plus_combo_final/workbench/v4819_full.cpp
+          python premium_plus_combo_final/workbench/post_warrior_defender_clean.py premium_plus_combo_final/workbench/v4819_full.cpp
+          python premium_plus_combo_final/workbench/post_clean_hotkeys.py premium_plus_combo_final/workbench/v4819_full.cpp
+          python premium_plus_combo_final/workbench/post_sparse_pixel_capture.py premium_plus_combo_final/workbench/v4819_full.cpp
+          python premium_plus_combo_final/workbench/make_production_clean.py premium_plus_combo_final/workbench/v4819_full.cpp premium_plus_combo_final/workbench/v4819_prod.cpp
+          if($LASTEXITCODE){throw 'source generation failed'}
+
+      - name: Preserve existing macro workers
+        shell: pwsh
+        run: |
+          @'
+          import pathlib
+          a=pathlib.Path('premium_plus_combo_final/workbench/v4815_baseline.cpp').read_text(encoding='utf-8')
+          b=pathlib.Path('premium_plus_combo_final/workbench/v4819_full.cpp').read_text(encoding='utf-8')
+          def fn(t,sig):
+              p=t.index(sig);q=t.index('{',p);d=0
+              for i in range(q,len(t)):
+                  if t[i]=='{':d+=1
+                  elif t[i]=='}':
+                      d-=1
+                      if d==0:return t[p:i+1]
+              raise RuntimeError(sig)
+          protected=['void MinorWorker()','void RWorker()','void CureWorker()','void ExecuteAttack(const AttackSettings& a)','void AttackWorker()','void WsWorker()','void VitalsWorker()','void MobSkillWorker()','void MobChaseWorker()','void MobScrollWorker()','void MobPriestWorker()']
+          for sig in protected:
+              if fn(a,sig)!=fn(b,sig):raise SystemExit('protected worker changed: '+sig)
+          print('LEGACY_WORKERS_UNCHANGED=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'legacy preservation failed'}
+
+      - name: Source architecture audit
+        shell: pwsh
+        run: |
+          @'
+          import pathlib
+          s=pathlib.Path('premium_plus_combo_final/workbench/v4819_full.cpp').read_text(encoding='utf-8')
+          for bad in ['BitBlt(','GetDIBits(','CreateCompatibleBitmap(','CreateCompatibleDC(']:
+              if bad in s:raise SystemExit('bulk capture remains: '+bad)
+          for good in ['RegisterHotKey(g_ui.main','UnregisterHotKey(g_ui.main','GetPixel(dc','MOUSEEVENTF_RIGHTDOWN','MOUSEEVENTF_RIGHTUP']:
+              if good not in s:raise SystemExit('required clean architecture missing: '+good)
+          print('BULK_SCREEN_CAPTURE=REMOVED')
+          print('SPARSE_PIXEL_SAMPLING=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'source audit failed'}
+
+      - name: Build diagnostic and production EXEs
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="4.8.19.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"/>
+            <description>Premium Plus Combo v4.8.19</description>
+            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="asInvoker" uiAccess="false"/></requestedPrivileges></security></trustInfo>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content v4819.manifest -Encoding UTF8
+          @'
+          #include <windows.h>
+          1 VERSIONINFO
+          FILEVERSION 4,8,19,0
+          PRODUCTVERSION 4,8,19,0
+          FILEFLAGSMASK 0x3fL
+          FILEFLAGS 0x0L
+          FILEOS VOS_NT_WINDOWS32
+          FILETYPE VFT_APP
+          FILESUBTYPE 0x0L
+          BEGIN
+            BLOCK "StringFileInfo"
+            BEGIN
+              BLOCK "040904B0"
+              BEGIN
+                VALUE "CompanyName", "Lefferion Prime\0"
+                VALUE "FileDescription", "Premium Plus Combo\0"
+                VALUE "FileVersion", "4.8.19.0\0"
+                VALUE "InternalName", "PremiumPlusCombo\0"
+                VALUE "OriginalFilename", "PremiumPlusCombo_v4.8.19.exe\0"
+                VALUE "ProductName", "Premium Plus Combo\0"
+                VALUE "ProductVersion", "4.8.19.0\0"
+              END
+            END
+            BLOCK "VarFileInfo"
+            BEGIN
+              VALUE "Translation", 0x0409, 1200
+            END
+          END
+          '@ | Set-Content v4819.rc -Encoding ASCII
+          rc.exe /nologo /fo v4819.res v4819.rc
+          if($LASTEXITCODE){throw 'resource compile failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX v4819_full.cpp /Fe:PremiumPlusCombo_v4.8.19_TEST.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT
+          if($LASTEXITCODE){throw 'diagnostic build failed'}
+          cl /nologo /std:c++17 /O2 /Gy /Gw /sdl /guard:cf /MT /EHsc /utf-8 /DNOMINMAX v4819_prod.cpp v4819.res /Fe:PremiumPlusCombo_v4.8.19.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /OPT:REF /OPT:ICF /INCREMENTAL:NO /SUBSYSTEM:WINDOWS /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /guard:cf /CETCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'production build failed'}
+          mt.exe -manifest v4819.manifest "-outputresource:PremiumPlusCombo_v4.8.19.exe;#1"
+          if($LASTEXITCODE){throw 'manifest embed failed'}
+
+      - name: Regression tests
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process .\PremiumPlusCombo_v4.8.19_TEST.exe -ArgumentList '--self-test' -Wait -PassThru;if($p.ExitCode){throw 'legacy test failed'}
+          $p=Start-Process .\PremiumPlusCombo_v4.8.19_TEST.exe -ArgumentList '--mob-model-test' -Wait -PassThru;if($p.ExitCode){throw 'mob test failed'}
+          $p=Start-Process .\PremiumPlusCombo_v4.8.19_TEST.exe -ArgumentList '--warrior-model-test' -Wait -PassThru;if($p.ExitCode){throw 'warrior test failed'}
+          $a=Get-Content self-test-report.txt -Raw;$m=Get-Content mob-model-test-report.txt -Raw;$w=Get-Content warrior-model-test-report.txt -Raw
+          if($a -notmatch 'PASSED=180'){throw '180 regression failed'}
+          if($m -notmatch 'PASSED=8'){throw 'mob regression failed'}
+          if($w -notmatch 'PASSED=8'){throw 'warrior regression failed'}
+
+      - name: Production import and PE audit
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          dumpbin /headers PremiumPlusCombo_v4.8.19.exe | Set-Content v4819-headers.txt
+          dumpbin /imports PremiumPlusCombo_v4.8.19.exe | Set-Content v4819-imports.txt
+          $h=Get-Content v4819-headers.txt -Raw;$i=Get-Content v4819-imports.txt -Raw
+          foreach($required in @('RegisterHotKey','UnregisterHotKey','SendInput','GetPixel')){if($i -notmatch [regex]::Escape($required)){throw "required import missing: $required"}}
+          foreach($bad in @('BitBlt','GetDIBits','CreateCompatibleBitmap','CreateCompatibleDC','SetWindowsHookExW','CallNextHookEx','UnhookWindowsHookEx','GetAsyncKeyState','GetCursorPos','SetCursorPos','WINHTTP.dll','WININET.dll','WS2_32.dll','CreateRemoteThread','WriteProcessMemory','VirtualAllocEx','OpenProcess','OpenFileMappingW')){if($i -match [regex]::Escape($bad)){throw "forbidden production import: $bad"}}
+          if($h -match 'E0000060'){throw 'RWX section found'}
+          if($h -notmatch 'Dynamic base'){throw 'ASLR missing'}
+          if($h -notmatch 'NX compatible'){throw 'NX missing'}
+
+      - name: Microsoft Defender signature update and scan
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Continue';$result='UNAVAILABLE'
+          Get-MpComputerStatus | Select-Object AntivirusEnabled,RealTimeProtectionEnabled,IoavProtectionEnabled,AntivirusSignatureVersion,AntivirusSignatureLastUpdated | Format-List | Out-File defender-status.txt
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe";if(!(Test-Path $mp)){$mp=Get-ChildItem 'C:\ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe' -ErrorAction SilentlyContinue|Sort-Object FullName -Descending|Select-Object -First 1 -ExpandProperty FullName}
+          if($mp -and (Test-Path $mp)){& $mp -SignatureUpdate 2>&1|Tee-Object defender-update-output.txt;$exe=(Resolve-Path '.\PremiumPlusCombo_v4.8.19.exe').Path;& $mp -Scan -ScanType 3 -File $exe -DisableRemediation 2>&1|Tee-Object defender-scan-output.txt;$text=if(Test-Path defender-scan-output.txt){Get-Content defender-scan-output.txt -Raw}else{''};if($text -match 'found no threats'){$result='NO_THREATS'}elseif($text -match '(?i)(threat|virus|trojan|malware).*(found|detected)' -or $text -match '(?i)(found|detected).*(threat|virus|trojan|malware)'){$result='THREAT_REPORTED'}}
+          "MICROSOFT_DEFENDER=$result"|Set-Content defender-result.txt
+          if($result -eq 'THREAT_REPORTED'){throw 'Defender reported threat'}
+          exit 0
+
+      - name: Release report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $sha=(Get-FileHash .\PremiumPlusCombo_v4.8.19.exe -Algorithm SHA256).Hash;$size=(Get-Item .\PremiumPlusCombo_v4.8.19.exe).Length;$def=if(Test-Path defender-result.txt){(Get-Content defender-result.txt -Raw).Trim()}else{'UNKNOWN'};$sig=(Get-AuthenticodeSignature .\PremiumPlusCombo_v4.8.19.exe).Status
+          @"
+          Product=Premium Plus Combo
+          Version=4.8.19.0
+          LegacySelfTest=180/180 PASS
+          MobModelTest=8/8 PASS
+          WarriorModelTest=8/8 PASS
+          RuntimeLowLevelKeyboardHook=NONE
+          RuntimeHotkeys=RegisterHotKey
+          BulkScreenCapture=NONE
+          ScreenReading=SparseGetPixel
+          WarriorEquipAction=RIGHT_CLICK_ONLY
+          NetworkImports=NONE
+          InjectionImports=NONE
+          RWXSections=NONE
+          Manifest=asInvoker
+          $def
+          AuthenticodeStatus=$sig
+          EXE_SIZE=$size
+          EXE_SHA256=$sha
+          "@|Set-Content V4819-REPORT.txt -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-v4.8.19-SPARSE-PIXELS
+          path: |
+            premium_plus_combo_final/workbench/PremiumPlusCombo_v4.8.19.exe
+            premium_plus_combo_final/workbench/V4819-REPORT.txt
+            premium_plus_combo_final/workbench/defender-result.txt
+            premium_plus_combo_final/workbench/defender-status.txt
+            premium_plus_combo_final/workbench/defender-scan-output.txt
+            premium_plus_combo_final/workbench/v4819-imports.txt
+            premium_plus_combo_final/workbench/self-test-report.txt
+            premium_plus_combo_final/workbench/mob-model-test-report.txt
+            premium_plus_combo_final/workbench/warrior-model-test-report.txt
+          retention-days: 14
