@@ -1,0 +1,246 @@
+name: Makro2 v4.8.16 Warrior Right Click
+
+on:
+  push:
+    branches: [ warrior-v4816-work ]
+    paths:
+      - 'premium_plus_combo_final/workbench/post_warrior_rightclick.py'
+      - 'premium_plus_combo_final/workbench/make_production_clean.py'
+      - '.github/workflows/makro2-v4816-warrior-rightclick.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-scan:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Generate v4.8.15 baseline and v4.8.16 Warrior source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
+          @'
+          import pathlib,hashlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/makro2_v4811_exact.cpp')
+          b=p.read_bytes().replace(b'\r\n',b'\n')
+          sha=hashlib.sha256(b).hexdigest().upper()
+          print('BASE_SHA256='+sha)
+          assert sha=='3AECB38864D0C248F926C9F15A8FF7F5BE4A1636ACAB966ADC40DA350C142A42'
+          '@ | python -
+          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base premium_plus_combo_final/workbench/makro2_v4816_full.cpp
+          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py premium_plus_combo_final/workbench/makro2_v4816_full.cpp
+          python premium_plus_combo_final/workbench/post_mob_r_chase.py premium_plus_combo_final/workbench/makro2_v4816_full.cpp
+          python premium_plus_combo_final/workbench/post_ui_compact_tabs.py premium_plus_combo_final/workbench/makro2_v4816_full.cpp
+          Copy-Item premium_plus_combo_final/workbench/makro2_v4816_full.cpp premium_plus_combo_final/workbench/makro2_v4815_baseline.cpp
+          python premium_plus_combo_final/workbench/post_warrior_rightclick.py premium_plus_combo_final/workbench/makro2_v4816_full.cpp
+          if($LASTEXITCODE){throw 'Warrior right-click patch failed'}
+          python premium_plus_combo_final/workbench/make_production_clean.py premium_plus_combo_final/workbench/makro2_v4816_full.cpp premium_plus_combo_final/workbench/makro2_v4816_prod.cpp
+          if($LASTEXITCODE){throw 'production cleanup failed'}
+
+      - name: Preserve existing worker bodies exactly
+        shell: pwsh
+        run: |
+          @'
+          import pathlib,hashlib
+          a=pathlib.Path('premium_plus_combo_final/workbench/makro2_v4815_baseline.cpp').read_text(encoding='utf-8')
+          b=pathlib.Path('premium_plus_combo_final/workbench/makro2_v4816_full.cpp').read_text(encoding='utf-8')
+          def fn(text,sig):
+              p=text.index(sig);q=text.index('{',p);d=0
+              for i in range(q,len(text)):
+                  if text[i]=='{':d+=1
+                  elif text[i]=='}':
+                      d-=1
+                      if d==0:return text[p:i+1]
+              raise RuntimeError(sig)
+          protected=['void MinorWorker()','void RWorker()','void CureWorker()','void ExecuteAttack(const AttackSettings& a)','void AttackWorker()','void WsWorker()','void VitalsWorker()','void MobSkillWorker()','void MobChaseWorker()','void MobScrollWorker()','void MobPriestWorker()']
+          for sig in protected:
+              x,y=fn(a,sig),fn(b,sig)
+              if x!=y: raise SystemExit('protected worker changed: '+sig)
+              print('UNCHANGED='+sig+' SHA256='+hashlib.sha256(x.encode()).hexdigest())
+          '@ | python -
+          if($LASTEXITCODE){throw 'legacy worker preservation failed'}
+
+      - name: Warrior source safety audit
+        shell: pwsh
+        run: |
+          @'
+          import pathlib
+          s=pathlib.Path('premium_plus_combo_final/workbench/makro2_v4816_full.cpp').read_text(encoding='utf-8')
+          def fn(sig):
+              p=s.index(sig);q=s.index('{',p);d=0
+              for i in range(q,len(s)):
+                  if s[i]=='{':d+=1
+                  elif s[i]=='}':
+                      d-=1
+                      if d==0:return s[p:i+1]
+              raise RuntimeError(sig)
+          w=fn('bool WarriorRightClickSlot')
+          required=['MOUSEEVENTF_RIGHTDOWN','MOUSEEVENTF_RIGHTUP','WarriorResolveInventory','WarriorSlotCellCenter']
+          for x in required:
+              if x not in w: raise SystemExit('missing '+x)
+          for x in ['MOUSEEVENTF_LEFTDOWN','MOUSEEVENTF_LEFTUP','Drag','drag']:
+              if x in w: raise SystemExit('forbidden Warrior drag/left-click path: '+x)
+          for x in ['WARRIOR AKTİF','ShieldSlot','WeaponSlot','7*cell','4*cell',"ReferenceTapKey('I')"]:
+              if x not in s: raise SystemExit('Warrior structure missing '+x)
+          print('WARRIOR_RIGHT_CLICK_ONLY=PASS')
+          print('INVENTORY_GRID_7X4=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'Warrior source audit failed'}
+
+      - name: Build diagnostic and production EXEs
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="4.8.16.0" processorArchitecture="amd64" name="Makro2" type="win32"/>
+            <description>Premium Plus Combo v4.8.16</description>
+            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security></trustInfo>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content v4816.manifest -Encoding UTF8
+          @'
+          #include <windows.h>
+          1 VERSIONINFO
+          FILEVERSION 4,8,16,0
+          PRODUCTVERSION 4,8,16,0
+          FILEFLAGSMASK 0x3fL
+          FILEFLAGS 0x0L
+          FILEOS VOS_NT_WINDOWS32
+          FILETYPE VFT_APP
+          FILESUBTYPE 0x0L
+          BEGIN
+            BLOCK "StringFileInfo"
+            BEGIN
+              BLOCK "040904B0"
+              BEGIN
+                VALUE "CompanyName", "Lefferion Prime\0"
+                VALUE "FileDescription", "Premium Plus Combo\0"
+                VALUE "FileVersion", "4.8.16.0\0"
+                VALUE "InternalName", "Makro2\0"
+                VALUE "OriginalFilename", "Makro2_v4.8.16_WARRIOR.exe\0"
+                VALUE "ProductName", "Premium Plus Combo\0"
+                VALUE "ProductVersion", "4.8.16.0\0"
+              END
+            END
+            BLOCK "VarFileInfo"
+            BEGIN
+              VALUE "Translation", 0x0409, 1200
+            END
+          END
+          '@ | Set-Content v4816.rc -Encoding ASCII
+          rc.exe /nologo /fo v4816.res v4816.rc
+          if($LASTEXITCODE){throw 'resource compile failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX makro2_v4816_full.cpp /Fe:Makro2_v4.8.16_TEST.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT
+          if($LASTEXITCODE){throw 'diagnostic build failed'}
+          cl /nologo /std:c++17 /O2 /GL /Gy /Gw /sdl /guard:cf /MT /EHsc /utf-8 /DNOMINMAX makro2_v4816_prod.cpp v4816.res /Fe:Makro2_v4.8.16_WARRIOR.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /LTCG /OPT:REF /OPT:ICF /INCREMENTAL:NO /SUBSYSTEM:WINDOWS /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /guard:cf /CETCOMPAT /Brepro /MANIFEST:NO
+          if($LASTEXITCODE){throw 'production build failed'}
+          mt.exe -manifest v4816.manifest "-outputresource:Makro2_v4.8.16_WARRIOR.exe;#1"
+          if($LASTEXITCODE){throw 'manifest embed failed'}
+
+      - name: Regression and Warrior model tests
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process .\Makro2_v4.8.16_TEST.exe -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode){throw "legacy self-test failed $($p.ExitCode)"}
+          $r=Get-Content self-test-report.txt -Raw
+          foreach($x in @('TOTAL=180','PASSED=180','AttackOrderedThreeSkills=PASS','MinorReferenceSequenceModel=PASS','ScanCodeTransport=PASS')){if($r -notmatch [regex]::Escape($x)){throw "legacy regression missing $x"}}
+          $p2=Start-Process .\Makro2_v4.8.16_TEST.exe -ArgumentList '--mob-model-test' -Wait -PassThru
+          if($p2.ExitCode){throw "MOB model failed $($p2.ExitCode)"}
+          $m=Get-Content mob-model-test-report.txt -Raw
+          foreach($x in @('TOTAL=8','PASSED=8','MobChaseUsesR=PASS','MobChaseNeverUsesW=PASS','PriestSingleThresholdEdge=PASS')){if($m -notmatch [regex]::Escape($x)){throw "MOB regression missing $x"}}
+          $p3=Start-Process .\Makro2_v4.8.16_TEST.exe -ArgumentList '--warrior-model-test' -Wait -PassThru
+          if($p3.ExitCode){throw "Warrior model failed $($p3.ExitCode)"}
+          $w=Get-Content warrior-model-test-report.txt -Raw
+          foreach($x in @('TOTAL=8','PASSED=8','Slot1TopLeft=PASS','Slot28BottomRight=PASS','Synthetic7x4Detected=PASS','SyntheticGridGeometry=PASS','RightClickDownFlag=PASS','RightClickUpFlag=PASS')){if($w -notmatch [regex]::Escape($x)){throw "Warrior regression missing $x"}}
+
+      - name: Production binary audit
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          dumpbin /headers Makro2_v4.8.16_WARRIOR.exe | Set-Content warrior-headers.txt
+          dumpbin /imports Makro2_v4.8.16_WARRIOR.exe | Set-Content warrior-imports.txt
+          $h=Get-Content warrior-headers.txt -Raw;$i=Get-Content warrior-imports.txt -Raw
+          if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
+          if($h -match 'E0000060'){throw 'RWX section found'}
+          if($h -notmatch 'Dynamic base'){throw 'ASLR missing'}
+          if($h -notmatch 'NX compatible'){throw 'NX missing'}
+          foreach($bad in @('WINHTTP.dll','WININET.dll','WS2_32.dll','CreateRemoteThread','WriteProcessMemory','VirtualAllocEx','OpenProcess','OpenFileMappingW')){if($i -match [regex]::Escape($bad)){throw "unexpected production import: $bad"}}
+          @'
+          import pathlib
+          b=pathlib.Path('Makro2_v4.8.16_WARRIOR.exe').read_bytes()
+          forbidden=[b'--self-test',b'--mob-model-test',b'--warrior-model-test',b'warrior-model-test-report.txt',b'self-test-report.txt',b'mob-model-test-report.txt']
+          for x in forbidden:
+              if x in b or x.decode('ascii').encode('utf-16le') in b: raise SystemExit('test-only data leaked: '+repr(x))
+          print('PRODUCTION_TEST_SURFACE_STRIPPED=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'production strip audit failed'}
+
+      - name: Microsoft Defender diagnostic
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Continue'
+          $result='UNAVAILABLE_ON_GITHUB_RUNNER';$exe=(Resolve-Path '.\Makro2_v4.8.16_WARRIOR.exe').Path
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(!(Test-Path $mp)){$mp=Get-ChildItem 'C:\ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe' -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName}
+          if($mp -and (Test-Path $mp)){& $mp -Scan -ScanType 3 -File $exe -DisableRemediation 2>&1 | Tee-Object -FilePath defender-scan-output.txt;$code=$LASTEXITCODE;$text=if(Test-Path defender-scan-output.txt){Get-Content defender-scan-output.txt -Raw}else{''};if($text -match 'found no threats'){$result='NO_THREATS'}elseif($text -match '(?i)(threat|virus|trojan|malware).*(found|detected)' -or $text -match '(?i)(found|detected).*(threat|virus|trojan|malware)'){$result='THREAT_REPORTED'}elseif($code -eq 0){$result='COMPLETED_NO_STANDARD_RESULT'}}else{'MpCmdRun unavailable on runner'|Set-Content defender-scan-output.txt}
+          "MICROSOFT_DEFENDER=$result"|Set-Content defender-result.txt
+          if($result -eq 'THREAT_REPORTED'){throw 'Microsoft Defender reported a threat'}
+          exit 0
+
+      - name: Release report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $sha=(Get-FileHash .\Makro2_v4.8.16_WARRIOR.exe -Algorithm SHA256).Hash;$size=(Get-Item .\Makro2_v4.8.16_WARRIOR.exe).Length;$sig=(Get-AuthenticodeSignature .\Makro2_v4.8.16_WARRIOR.exe).Status;$def=if(Test-Path defender-result.txt){(Get-Content defender-result.txt -Raw).Trim()}else{'UNKNOWN'}
+          @"
+          Product=Premium Plus Combo / Makro2
+          Version=4.8.16.0
+          LegacySelfTest=180/180 PASS
+          MobModelTest=8/8 PASS
+          WarriorModelTest=8/8 PASS
+          WarriorInventoryGrid=7x4 / 28 slots
+          WarriorInventoryOpenDetection=AUTO
+          WarriorPressIWhenAlreadyOpen=NO
+          WarriorEquipAction=RIGHT_CLICK_ONLY
+          WarriorDragDrop=NONE
+          WarriorLeftClick=NONE
+          ExistingWorkerBodies=UNCHANGED
+          NetworkImports=NONE
+          InjectionImports=NONE
+          RWXSections=NONE
+          ASLR=PASS
+          NX=PASS
+          $def
+          AuthenticodeStatus=$sig
+          EXE_SIZE=$size
+          EXE_SHA256=$sha
+          "@ | Set-Content WARRIOR-BUILD-REPORT.txt -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Makro2-v4.8.16-WARRIOR-RIGHTCLICK
+          path: |
+            premium_plus_combo_final/workbench/Makro2_v4.8.16_WARRIOR.exe
+            premium_plus_combo_final/workbench/WARRIOR-BUILD-REPORT.txt
+            premium_plus_combo_final/workbench/defender-result.txt
+            premium_plus_combo_final/workbench/defender-scan-output.txt
+            premium_plus_combo_final/workbench/self-test-report.txt
+            premium_plus_combo_final/workbench/mob-model-test-report.txt
+            premium_plus_combo_final/workbench/warrior-model-test-report.txt
+            premium_plus_combo_final/workbench/warrior-imports.txt
+            premium_plus_combo_final/workbench/warrior-headers.txt
+          retention-days: 14
