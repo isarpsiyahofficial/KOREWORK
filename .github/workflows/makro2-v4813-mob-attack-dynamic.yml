@@ -46,7 +46,6 @@ jobs:
           if($LASTEXITCODE){throw 'R chase patch failed'}
           python premium_plus_combo_final/workbench/make_production_clean.py premium_plus_combo_final/workbench/makro2_v4814_full.cpp premium_plus_combo_final/workbench/makro2_v4814_prod.cpp
           if($LASTEXITCODE){throw 'production cleanup failed'}
-          $full=Get-Content premium_plus_combo_final/workbench/makro2_v4814_full.cpp -Raw
           $prod=Get-Content premium_plus_combo_final/workbench/makro2_v4814_prod.cpp -Raw
           foreach($x in @('MOB ATTACK','+ Skill Ekle','+ Scroll Ekle','Random kullan','MobAnchorDistance','PRIEST AKTİF','MobChaseWorker','MobChaseKey')){if($prod -notmatch [regex]::Escape($x)){throw "production source missing $x"}}
           foreach($x in @('--self-test','--transport-observer-test','--attack-observer-test','--attack-z-off-observer-test','--auto-minor-observer-test','--cure-observer-test','--mob-model-test')){if($prod -match [regex]::Escape($x)){throw "test dispatcher leaked into production source: $x"}}
@@ -102,8 +101,10 @@ jobs:
           cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX makro2_v4814_full.cpp /Fe:Makro2_v4.8.14_TEST.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT
           if($LASTEXITCODE){throw 'test build failed'}
 
-          cl /nologo /std:c++17 /O2 /GL /Gy /Gw /sdl /guard:cf /MT /EHsc /utf-8 /DNOMINMAX makro2_v4814_prod.cpp v4814.res /Fe:Makro2_v4.8.14_CLEAN.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /LTCG /OPT:REF /OPT:ICF /INCREMENTAL:NO /SUBSYSTEM:WINDOWS /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /guard:cf /CETCOMPAT /Brepro /MANIFEST:EMBED /MANIFESTINPUT:v4814.manifest
+          cl /nologo /std:c++17 /O2 /GL /Gy /Gw /sdl /guard:cf /MT /EHsc /utf-8 /DNOMINMAX makro2_v4814_prod.cpp v4814.res /Fe:Makro2_v4.8.14_CLEAN.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /LTCG /OPT:REF /OPT:ICF /INCREMENTAL:NO /SUBSYSTEM:WINDOWS /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /guard:cf /CETCOMPAT /Brepro /MANIFEST:NO
           if($LASTEXITCODE){throw 'production build failed'}
+          mt.exe -manifest v4814.manifest "-outputresource:Makro2_v4.8.14_CLEAN.exe;#1"
+          if($LASTEXITCODE){throw 'production manifest embed failed'}
 
       - name: Run complete regression suite on diagnostic build
         shell: pwsh
@@ -130,7 +131,8 @@ jobs:
           $i=Get-Content clean-imports.txt -Raw
           if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
           if($h -match 'E0000060'){throw 'RWX section found'}
-          foreach($required in @('Dynamic base','NX compatible')){if($h -notmatch $required){throw "missing hardening flag $required"}}
+          if($h -notmatch 'Dynamic base'){throw 'ASLR missing'}
+          if($h -notmatch 'NX compatible'){throw 'NX missing'}
           foreach($bad in @('WINHTTP.dll','WININET.dll','WS2_32.dll','CreateRemoteThread','WriteProcessMemory','VirtualAllocEx','OpenProcess')){if($i -match [regex]::Escape($bad)){throw "suspicious import present: $bad"}}
           if($i -match [regex]::Escape('OpenFileMappingW')){throw 'unused optional position mapping remained in production binary'}
           @'
