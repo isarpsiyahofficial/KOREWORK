@@ -1,0 +1,261 @@
+name: PremiumPlus v4.8.19 Stable Shape
+
+on:
+  push:
+    branches: [ premiumplus-v4819-stable-shape ]
+    paths:
+      - '.github/workflows/premiumplus-v4819-stable-shape.yml'
+      - 'premium_plus_combo_final/workbench/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-scan:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Verify exact known-good source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import pathlib,hashlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/makro2_v4811_exact.cpp')
+          b=p.read_bytes().replace(b'\r\n',b'\n')
+          sha=hashlib.sha256(b).hexdigest().upper()
+          print('SOURCE_SHA256='+sha)
+          assert sha=='3AECB38864D0C248F926C9F15A8FF7F5BE4A1636ACAB966ADC40DA350C142A42'
+          '@ | python -
+
+      - name: Generate current features from v4.8.11 source only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
+          $out='premium_plus_combo_final/workbench/premiumplus_v4819.cpp'
+          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base $out
+          if($LASTEXITCODE){throw 'apply_mob_dynamic failed'}
+          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py $out
+          if($LASTEXITCODE){throw 'post_mob_dynamic_fix failed'}
+          python premium_plus_combo_final/workbench/post_mob_r_chase.py $out
+          if($LASTEXITCODE){throw 'post_mob_r_chase failed'}
+          python premium_plus_combo_final/workbench/post_ui_compact_tabs.py $out
+          if($LASTEXITCODE){throw 'post_ui_compact_tabs failed'}
+          python premium_plus_combo_final/workbench/post_warrior_rightclick.py $out
+          if($LASTEXITCODE){throw 'post_warrior_rightclick failed'}
+          python premium_plus_combo_final/workbench/post_warrior_defender_clean.py $out
+          if($LASTEXITCODE){throw 'post_warrior_defender_clean failed'}
+          @'
+          import pathlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4819.cpp')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('Premium Plus Combo | v4.8.17','Premium Plus Combo | v4.8.19')
+          if 'Premium Plus Combo | v4.8.19' not in s: raise SystemExit('title patch failed')
+          p.write_text(s,encoding='utf-8',newline='\n')
+          print('CURRENT_FEATURE_SOURCE=PASS')
+          '@ | python -
+
+      - name: Preserve legacy macro workers
+        shell: pwsh
+        run: |
+          @'
+          import pathlib,hashlib
+          base=pathlib.Path('premium_plus_combo_final/workbench/makro2_v4811_exact.cpp').read_text(encoding='utf-8')
+          new=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4819.cpp').read_text(encoding='utf-8')
+          def fn(t,sig):
+              p=t.index(sig); q=t.index('{',p); d=0
+              for i in range(q,len(t)):
+                  if t[i]=='{': d+=1
+                  elif t[i]=='}':
+                      d-=1
+                      if d==0:return t[p:i+1]
+              raise RuntimeError(sig)
+          # These original v4.8.11 workers must remain byte-for-byte unchanged.
+          protected=['void MinorWorker()','void RWorker()','void CureWorker()','void WsWorker()']
+          for sig in protected:
+              a,b=fn(base,sig),fn(new,sig)
+              if a!=b: raise SystemExit('KNOWN_GOOD_WORKER_CHANGED='+sig)
+              print('UNCHANGED='+sig+' SHA256='+hashlib.sha256(a.encode()).hexdigest())
+          print('KNOWN_GOOD_CORE_PRESERVED=PASS')
+          '@ | python -
+
+      - name: Source safety audit
+        shell: pwsh
+        run: |
+          @'
+          import pathlib
+          s=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4819.cpp').read_text(encoding='utf-8')
+          for bad in ['CreateRemoteThread','WriteProcessMemory','VirtualAllocEx','WinHttpOpen','InternetOpenW','WSAStartup']:
+              if bad in s: raise SystemExit('forbidden source API '+bad)
+          # Warrior remains right-click only, no drag/left click.
+          p=s.index('bool WarriorRightClickSlot'); q=s.index('{',p); d=0; end=None
+          for i in range(q,len(s)):
+              if s[i]=='{': d+=1
+              elif s[i]=='}':
+                  d-=1
+                  if d==0: end=i+1; break
+          w=s[p:end]
+          for good in ['MOUSEEVENTF_RIGHTDOWN','MOUSEEVENTF_RIGHTUP']:
+              if good not in w: raise SystemExit('missing warrior action '+good)
+          for bad in ['MOUSEEVENTF_LEFTDOWN','MOUSEEVENTF_LEFTUP','mouse_event(','GetCursorPos','SetCursorPos']:
+              if bad in w: raise SystemExit('forbidden warrior action '+bad)
+          print('WARRIOR_RIGHT_CLICK_ONLY=PASS')
+          print('SOURCE_SAFETY=PASS')
+          '@ | python -
+
+      - name: Build v4.8.11 control with legacy production settings
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.11.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"></assemblyIdentity><description>Premium Plus Combo - Rogue</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"></requestedExecutionLevel></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content v4811-legacy.manifest -Encoding UTF8
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX makro2_v4811_exact.cpp /Fe:PremiumPlusCombo-v4.8.11-CONTROL.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'v4.8.11 control build failed'}
+          mt.exe -nologo -manifest v4811-legacy.manifest "-outputresource:PremiumPlusCombo-v4.8.11-CONTROL.exe;#1"
+          if($LASTEXITCODE){throw 'v4.8.11 manifest failed'}
+
+      - name: Build v4.8.19 with same legacy production settings
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.19.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"></assemblyIdentity><description>Premium Plus Combo - Rogue</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"></requestedExecutionLevel></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content v4819-legacy.manifest -Encoding UTF8
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX premiumplus_v4819.cpp /Fe:PremiumPlusCombo-v4.8.19-STABLE.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'v4.8.19 legacy-shape build failed'}
+          mt.exe -nologo -manifest v4819-legacy.manifest "-outputresource:PremiumPlusCombo-v4.8.19-STABLE.exe;#1"
+          if($LASTEXITCODE){throw 'v4.8.19 manifest failed'}
+
+      - name: Compare control binary shape to uploaded known-good fingerprint
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          dumpbin /headers PremiumPlusCombo-v4.8.11-CONTROL.exe | Set-Content v4811-control-headers.txt
+          dumpbin /headers PremiumPlusCombo-v4.8.19-STABLE.exe | Set-Content v4819-headers.txt
+          dumpbin /imports PremiumPlusCombo-v4.8.19-STABLE.exe | Set-Content v4819-imports.txt
+          @'
+          import pathlib,struct,re,hashlib
+          def pe(path):
+              b=pathlib.Path(path).read_bytes(); peoff=struct.unpack_from('<I',b,0x3c)[0]
+              coff=peoff+4; sections=struct.unpack_from('<H',b,coff+2)[0]
+              opt=coff+20; magic=struct.unpack_from('<H',b,opt)[0]; assert magic==0x20b
+              dll=struct.unpack_from('<H',b,opt+0x46)[0]
+              return b,sections,dll
+          c,cs,cd=pe('PremiumPlusCombo-v4.8.11-CONTROL.exe')
+          n,ns,nd=pe('PremiumPlusCombo-v4.8.19-STABLE.exe')
+          print('CONTROL_SIZE='+str(len(c)))
+          print('KNOWN_GOOD_UPLOADED_SIZE=419328')
+          print('CONTROL_SECTIONS='+str(cs))
+          print('CONTROL_DLLCHAR=0x%04X'%cd)
+          print('RELEASE_SIZE='+str(len(n)))
+          print('RELEASE_SECTIONS='+str(ns))
+          print('RELEASE_DLLCHAR=0x%04X'%nd)
+          # Known-good uploaded v4.8.11 fingerprint from direct inspection: 7 sections, DllCharacteristics 0x8160, manifest-only resource, no Authenticode.
+          if cs!=7 or cd!=0x8160: raise SystemExit('legacy control PE shape mismatch')
+          if ns!=7 or nd!=0x8160: raise SystemExit('release PE shape diverged from known-good family')
+          for marker in [b'CompanyName',b'FileVersion',b'OriginalFilename']:
+              if marker in n or marker.decode().encode('utf-16le') in n: raise SystemExit('new VERSIONINFO leaked into stable-shape binary')
+          if b'requireAdministrator' not in n: raise SystemExit('legacy manifest privilege shape missing')
+          print('LEGACY_BINARY_SHAPE=PASS')
+          print('RELEASE_SHA256='+hashlib.sha256(n).hexdigest().upper())
+          '@ | python -
+          $imports=Get-Content v4819-imports.txt -Raw
+          foreach($bad in @('WINHTTP.dll','WININET.dll','WS2_32.dll','CreateRemoteThread','WriteProcessMemory','VirtualAllocEx','OpenProcess','OpenFileMappingW','GetCursorPos','SetCursorPos')){if($imports -match [regex]::Escape($bad)){throw "unexpected import: $bad"}}
+
+      - name: Full regression tests on the actual release EXE
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process .\PremiumPlusCombo-v4.8.19-STABLE.exe -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode){throw "legacy self-test failed $($p.ExitCode)"}
+          $a=Get-Content self-test-report.txt -Raw
+          if($a -notmatch 'TOTAL=180' -or $a -notmatch 'PASSED=180'){throw '180/180 regression failed'}
+          $p=Start-Process .\PremiumPlusCombo-v4.8.19-STABLE.exe -ArgumentList '--mob-model-test' -Wait -PassThru
+          if($p.ExitCode){throw "mob model failed $($p.ExitCode)"}
+          $m=Get-Content mob-model-test-report.txt -Raw
+          if($m -notmatch 'TOTAL=8' -or $m -notmatch 'PASSED=8'){throw 'MOB 8/8 failed'}
+          $p=Start-Process .\PremiumPlusCombo-v4.8.19-STABLE.exe -ArgumentList '--warrior-model-test' -Wait -PassThru
+          if($p.ExitCode){throw "warrior model failed $($p.ExitCode)"}
+          $w=Get-Content warrior-model-test-report.txt -Raw
+          if($w -notmatch 'TOTAL=8' -or $w -notmatch 'PASSED=8'){throw 'Warrior 8/8 failed'}
+
+      - name: Microsoft Defender scan of actual release
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Continue'
+          $result='UNAVAILABLE';$exe=(Resolve-Path '.\PremiumPlusCombo-v4.8.19-STABLE.exe').Path
+          try { Update-MpSignature -ErrorAction SilentlyContinue } catch {}
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(!(Test-Path $mp)){$mp=Get-ChildItem 'C:\ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe' -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName}
+          if($mp -and (Test-Path $mp)){
+            & $mp -Scan -ScanType 3 -File $exe -DisableRemediation 2>&1 | Tee-Object -FilePath defender-scan-output.txt
+            $text=if(Test-Path defender-scan-output.txt){Get-Content defender-scan-output.txt -Raw}else{''}
+            if($text -match 'found no threats'){$result='NO_THREATS'}
+            elseif($text -match '(?i)(threat|virus|trojan|malware).*(found|detected)' -or $text -match '(?i)(found|detected).*(threat|virus|trojan|malware)'){$result='THREAT_REPORTED'}
+          }
+          "MICROSOFT_DEFENDER=$result" | Set-Content defender-result.txt
+          if($result -eq 'THREAT_REPORTED'){throw 'Defender reported threat'}
+          exit 0
+
+      - name: Release report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $sha=(Get-FileHash .\PremiumPlusCombo-v4.8.19-STABLE.exe -Algorithm SHA256).Hash
+          $size=(Get-Item .\PremiumPlusCombo-v4.8.19-STABLE.exe).Length
+          $ctrl=(Get-Item .\PremiumPlusCombo-v4.8.11-CONTROL.exe).Length
+          $def=if(Test-Path defender-result.txt){(Get-Content defender-result.txt -Raw).Trim()}else{'UNKNOWN'}
+          @"
+          Product=Premium Plus Combo
+          Version=4.8.19
+          BaseSource=v4.8.11 exact
+          UploadedKnownGoodEXE_SHA256=E9B5C7ECD2933EEA64EF096494CF428E2D7F410D43CB32628C7459640B85C936
+          UploadedKnownGoodEXE_SIZE=419328
+          BuildIdentity=PremiumPlusCombo
+          LegacyBuildFlags=/O2 /MT /EHsc /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT
+          LTCG=NO
+          Brepro=NO
+          CFG=NO
+          CET=NO
+          VERSIONINFO=NO
+          Manifest=requireAdministrator / PerMonitorV2
+          KnownGoodCoreWorkers=UNCHANGED
+          LegacySelfTest=180/180 PASS
+          MobModelTest=8/8 PASS
+          WarriorModelTest=8/8 PASS
+          WarriorEquipAction=RIGHT_CLICK_ONLY
+          NetworkImports=NONE
+          InjectionImports=NONE
+          CursorPositionImports=NONE
+          ControlRebuildSize=$ctrl
+          ReleaseSize=$size
+          $def
+          EXE_SHA256=$sha
+          "@ | Set-Content PremiumPlusCombo-v4.8.19-REPORT.txt -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-v4.8.19-STABLE-SHAPE
+          path: |
+            premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.19-STABLE.exe
+            premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.19-REPORT.txt
+            premium_plus_combo_final/workbench/defender-result.txt
+            premium_plus_combo_final/workbench/defender-scan-output.txt
+            premium_plus_combo_final/workbench/self-test-report.txt
+            premium_plus_combo_final/workbench/mob-model-test-report.txt
+            premium_plus_combo_final/workbench/warrior-model-test-report.txt
+            premium_plus_combo_final/workbench/v4819-headers.txt
+            premium_plus_combo_final/workbench/v4819-imports.txt
+            premium_plus_combo_final/workbench/v4811-control-headers.txt
+          retention-days: 14
