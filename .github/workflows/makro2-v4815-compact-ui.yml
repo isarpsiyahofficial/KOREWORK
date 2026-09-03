@@ -1,0 +1,223 @@
+name: Makro2 v4.8.15 Compact UI
+
+on:
+  push:
+    branches: [ ui-compact-v4815-work ]
+    paths:
+      - 'premium_plus_combo_final/workbench/post_ui_compact_tabs.py'
+      - '.github/workflows/makro2-v4815-compact-ui.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-scan:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Generate v4.8.15 source from known-good base
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
+          @'
+          import pathlib,hashlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/makro2_v4811_exact.cpp')
+          b=p.read_bytes().replace(b'\r\n',b'\n')
+          sha=hashlib.sha256(b).hexdigest().upper()
+          print('BASE_SHA256='+sha)
+          assert sha=='3AECB38864D0C248F926C9F15A8FF7F5BE4A1636ACAB966ADC40DA350C142A42'
+          '@ | python -
+          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base premium_plus_combo_final/workbench/makro2_v4815_full.cpp
+          if($LASTEXITCODE){throw 'MOB patch failed'}
+          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py premium_plus_combo_final/workbench/makro2_v4815_full.cpp
+          if($LASTEXITCODE){throw 'post fix failed'}
+          python premium_plus_combo_final/workbench/post_mob_r_chase.py premium_plus_combo_final/workbench/makro2_v4815_full.cpp
+          if($LASTEXITCODE){throw 'R chase patch failed'}
+          python premium_plus_combo_final/workbench/post_ui_compact_tabs.py premium_plus_combo_final/workbench/makro2_v4815_full.cpp
+          if($LASTEXITCODE){throw 'compact UI patch failed'}
+          python premium_plus_combo_final/workbench/make_production_clean.py premium_plus_combo_final/workbench/makro2_v4815_full.cpp premium_plus_combo_final/workbench/makro2_v4815_prod.cpp
+          if($LASTEXITCODE){throw 'production cleanup failed'}
+
+      - name: Static UI structure audit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import pathlib,re
+          p=pathlib.Path('premium_plus_combo_final/workbench/makro2_v4815_full.cpp')
+          s=p.read_text(encoding='utf-8')
+          required=['v4.8.15','kWindowWidth = 760','kWindowHeight = 620','IDC_MOB_TAB_GENERAL','IDC_MOB_TAB_PRIEST','ShowMobSubCategory','mobGeneralPage','mobPriestPage','Skill %-2d','RebuildUiFonts','WM_DPICHANGED']
+          for x in required:
+              assert x in s,x
+          assert 'L"Ek "+std::to_wstring' not in s
+          a=s.index('void CreateAttackPage()');b=s.index('void CreateMobPage()',a);attack=s[a:b]
+          assert 'attackExtraList=Ctrl' in attack and 'kContentX+4,336,430,74' in attack
+          assert 'kContentX+488,392,132,72' not in attack
+          assert attack.index('Skill "+std::to_wstring(i+1)') < attack.index('attackExtraList=Ctrl')
+          a=s.index('void CreateMobPage()');b=s.index('void LayoutChrome()',a);mob=s[a:b]
+          assert 'mobTabGeneral' in mob and 'mobTabPriest' in mob
+          assert 'general(g_ui.mobGeneralEnable)' in mob and 'priest(g_ui.mobPriestEnable)' in mob
+          assert 'general(g_ui.mobHealEnable)' not in mob
+          assert 'priest(g_ui.mobHealEnable)' in mob
+          for core in ['void MinorWorker()','void CureWorker()','void AttackWorker()','void MobChaseWorker()']:
+              assert s.count(core)==1,core
+          print('UI_STRUCTURE_AUDIT=PASS')
+          '@ | python -
+
+      - name: Build diagnostic and clean production EXEs
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="4.8.15.0" processorArchitecture="amd64" name="Makro2" type="win32"/>
+            <description>Premium Plus Combo v4.8.15 Compact UI</description>
+            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security></trustInfo>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content v4815.manifest -Encoding UTF8
+          @'
+          #include <windows.h>
+          1 VERSIONINFO
+          FILEVERSION 4,8,15,0
+          PRODUCTVERSION 4,8,15,0
+          FILEFLAGSMASK 0x3fL
+          FILEFLAGS 0x0L
+          FILEOS VOS_NT_WINDOWS32
+          FILETYPE VFT_APP
+          FILESUBTYPE 0x0L
+          BEGIN
+            BLOCK "StringFileInfo"
+            BEGIN
+              BLOCK "040904B0"
+              BEGIN
+                VALUE "CompanyName", "Lefferion Prime\0"
+                VALUE "FileDescription", "Premium Plus Combo\0"
+                VALUE "FileVersion", "4.8.15.0\0"
+                VALUE "InternalName", "Makro2\0"
+                VALUE "OriginalFilename", "Makro2_v4.8.15_COMPACT.exe\0"
+                VALUE "ProductName", "Premium Plus Combo\0"
+                VALUE "ProductVersion", "4.8.15.0\0"
+              END
+            END
+            BLOCK "VarFileInfo"
+            BEGIN
+              VALUE "Translation", 0x0409, 1200
+            END
+          END
+          '@ | Set-Content v4815.rc -Encoding ASCII
+          rc.exe /nologo /fo v4815.res v4815.rc
+          if($LASTEXITCODE){throw 'resource compile failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX makro2_v4815_full.cpp /Fe:Makro2_v4.8.15_TEST.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT
+          if($LASTEXITCODE){throw 'diagnostic build failed'}
+          cl /nologo /std:c++17 /O2 /GL /Gy /Gw /sdl /guard:cf /MT /EHsc /utf-8 /DNOMINMAX makro2_v4815_prod.cpp v4815.res /Fe:Makro2_v4.8.15_COMPACT.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /LTCG /OPT:REF /OPT:ICF /INCREMENTAL:NO /SUBSYSTEM:WINDOWS /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /guard:cf /CETCOMPAT /Brepro /MANIFEST:NO
+          if($LASTEXITCODE){throw 'production build failed'}
+          mt.exe -manifest v4815.manifest "-outputresource:Makro2_v4.8.15_COMPACT.exe;#1"
+          if($LASTEXITCODE){throw 'manifest embed failed'}
+
+      - name: Preserve core regression suites
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process .\Makro2_v4.8.15_TEST.exe -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode){throw "legacy self-test failed $($p.ExitCode)"}
+          $r=Get-Content self-test-report.txt -Raw
+          foreach($x in @('TOTAL=180','PASSED=180','AttackOrderedThreeSkills=PASS','MinorReferenceSequenceModel=PASS','ScanCodeTransport=PASS','AutoMinorStartAt30=PASS','AutoMinorStopAt75=PASS')){if($r -notmatch [regex]::Escape($x)){throw "legacy regression missing $x"}}
+          $p2=Start-Process .\Makro2_v4.8.15_TEST.exe -ArgumentList '--mob-model-test' -Wait -PassThru
+          if($p2.ExitCode){throw "MOB model test failed $($p2.ExitCode)"}
+          $m=Get-Content mob-model-test-report.txt -Raw
+          foreach($x in @('TOTAL=8','PASSED=8','AttackDynamicSequential=PASS','MobDynamicSequential=PASS','PriestSingleThresholdEdge=PASS','MobChaseUsesR=PASS','MobChaseNeverUsesW=PASS')){if($m -notmatch [regex]::Escape($x)){throw "MOB regression missing $x"}}
+
+      - name: Production binary audit
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          dumpbin /headers Makro2_v4.8.15_COMPACT.exe | Set-Content clean-headers.txt
+          dumpbin /imports Makro2_v4.8.15_COMPACT.exe | Set-Content clean-imports.txt
+          $h=Get-Content clean-headers.txt -Raw;$i=Get-Content clean-imports.txt -Raw
+          if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
+          if($h -match 'E0000060'){throw 'RWX section found'}
+          if($h -notmatch 'Dynamic base'){throw 'ASLR missing'}
+          if($h -notmatch 'NX compatible'){throw 'NX missing'}
+          foreach($bad in @('WINHTTP.dll','WININET.dll','WS2_32.dll','CreateRemoteThread','WriteProcessMemory','VirtualAllocEx','OpenProcess','OpenFileMappingW')){if($i -match [regex]::Escape($bad)){throw "unexpected production import: $bad"}}
+          @'
+          import pathlib
+          b=pathlib.Path('Makro2_v4.8.15_COMPACT.exe').read_bytes()
+          forbidden=[b'--self-test',b'--transport-observer-test',b'--attack-observer-test',b'--attack-z-off-observer-test',b'--auto-minor-observer-test',b'--cure-observer-test',b'--mob-model-test']
+          for x in forbidden:
+              if x in b or x.decode().encode('utf-16le') in b: raise SystemExit('test data leaked '+repr(x))
+          print('PRODUCTION_STRIP=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'production strip audit failed'}
+
+      - name: Microsoft Defender diagnostic
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Continue'
+          $result='UNAVAILABLE_ON_GITHUB_RUNNER';$exe=(Resolve-Path '.\Makro2_v4.8.15_COMPACT.exe').Path
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(!(Test-Path $mp)){$mp=Get-ChildItem 'C:\ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe' -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName}
+          if($mp -and (Test-Path $mp)){
+            & $mp -Scan -ScanType 3 -File $exe -DisableRemediation 2>&1 | Tee-Object -FilePath defender-scan-output.txt
+            $code=$LASTEXITCODE;$text=if(Test-Path defender-scan-output.txt){Get-Content defender-scan-output.txt -Raw}else{''}
+            if($text -match 'found no threats'){$result='NO_THREATS'}elseif($text -match '(?i)(threat|virus|trojan|malware).*(found|detected)' -or $text -match '(?i)(found|detected).*(threat|virus|trojan|malware)'){$result='THREAT_REPORTED'}elseif($code -eq 0){$result='COMPLETED_NO_STANDARD_RESULT'}
+          }else{'MpCmdRun unavailable on runner'|Set-Content defender-scan-output.txt}
+          "MICROSOFT_DEFENDER=$result"|Set-Content defender-result.txt
+          if($result -eq 'THREAT_REPORTED'){throw 'Microsoft Defender reported a threat'}
+          exit 0
+
+      - name: Release report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $sha=(Get-FileHash .\Makro2_v4.8.15_COMPACT.exe -Algorithm SHA256).Hash
+          $size=(Get-Item .\Makro2_v4.8.15_COMPACT.exe).Length
+          $sig=(Get-AuthenticodeSignature .\Makro2_v4.8.15_COMPACT.exe).Status
+          $def=if(Test-Path defender-result.txt){(Get-Content defender-result.txt -Raw).Trim()}else{'MICROSOFT_DEFENDER=UNKNOWN'}
+          @"
+          Product=Premium Plus Combo / Makro2
+          Version=4.8.15.0
+          KnownGoodBaseSHA256=3AECB38864D0C248F926C9F15A8FF7F5BE4A1636ACAB966ADC40DA350C142A42
+          UI=COMPACT
+          MobSubTabs=GENEL,PRIEST
+          PriestNestedUnderMob=PASS
+          AttackExtraSkillsBelowSkill4=PASS
+          DpiResponsiveFonts=PASS
+          LegacySelfTest=180/180 PASS
+          MobModelTest=8/8 PASS
+          MobChaseCommand=R
+          MobChaseUsesW=NO
+          ProductionTestDispatchers=REMOVED
+          NetworkImports=NONE
+          InjectionImports=NONE
+          RWXSections=NONE
+          ASLR=PASS
+          NX=PASS
+          $def
+          AuthenticodeStatus=$sig
+          EXE_SIZE=$size
+          EXE_SHA256=$sha
+          "@ | Set-Content V4815-REPORT.txt -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Makro2-v4.8.15-COMPACT
+          path: |
+            premium_plus_combo_final/workbench/Makro2_v4.8.15_COMPACT.exe
+            premium_plus_combo_final/workbench/V4815-REPORT.txt
+            premium_plus_combo_final/workbench/defender-result.txt
+            premium_plus_combo_final/workbench/defender-scan-output.txt
+            premium_plus_combo_final/workbench/self-test-report.txt
+            premium_plus_combo_final/workbench/mob-model-test-report.txt
+          retention-days: 14
