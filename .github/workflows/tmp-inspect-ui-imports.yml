@@ -1,0 +1,24 @@
+name: TEMP inspect v4819 UI imports
+on:
+  push:
+    branches: [ premiumplus-v4819-stable-shape ]
+    paths: [ '.github/workflows/tmp-inspect-ui-imports.yml' ]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate source and show API contexts
+        shell: pwsh
+        run: |
+          $base='premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
+          $out='premium_plus_combo_final/workbench/tmp_v4819.cpp'
+          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base $out
+          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py $out
+          python premium_plus_combo_final/workbench/post_mob_r_chase.py $out
+          python premium_plus_combo_final/workbench/post_ui_compact_tabs.py $out
+          python premium_plus_combo_final/workbench/post_warrior_rightclick.py $out
+          python premium_plus_combo_final/workbench/post_warrior_defender_clean.py $out
+          Select-String -Path $out -Pattern 'EnumChildWindows|GetDpiForSystem|SetWindowPos|MulDiv' -Context 2,2 | ForEach-Object { $_.ToString() }
