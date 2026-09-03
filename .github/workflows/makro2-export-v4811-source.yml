@@ -1,6 +1,10 @@
 name: Makro2 Export Exact v4.8.11 Source
 
 on:
+  push:
+    branches: [ premium-plus-combo-cure-attack-vitals-ws ]
+    paths:
+      - '.github/workflows/makro2-export-v4811-source.yml'
   workflow_dispatch:
 
 permissions:
