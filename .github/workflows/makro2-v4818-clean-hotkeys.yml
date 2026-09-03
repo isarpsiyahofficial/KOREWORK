@@ -1,0 +1,277 @@
+name: Premium Plus Combo v4.8.18 Clean Hotkeys
+
+on:
+  push:
+    branches: [ warrior-v4818-clean-hotkeys ]
+    paths:
+      - 'premium_plus_combo_final/workbench/post_clean_hotkeys.py'
+      - '.github/workflows/makro2-v4818-clean-hotkeys.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-scan:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Generate v4.8.18 source from preserved baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
+          @'
+          import pathlib,hashlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/makro2_v4811_exact.cpp')
+          b=p.read_bytes().replace(b'\r\n',b'\n')
+          sha=hashlib.sha256(b).hexdigest().upper()
+          print('BASE_SHA256='+sha)
+          assert sha=='3AECB38864D0C248F926C9F15A8FF7F5BE4A1636ACAB966ADC40DA350C142A42'
+          '@ | python -
+          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base premium_plus_combo_final/workbench/v4818_full.cpp
+          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py premium_plus_combo_final/workbench/v4818_full.cpp
+          python premium_plus_combo_final/workbench/post_mob_r_chase.py premium_plus_combo_final/workbench/v4818_full.cpp
+          python premium_plus_combo_final/workbench/post_ui_compact_tabs.py premium_plus_combo_final/workbench/v4818_full.cpp
+          Copy-Item premium_plus_combo_final/workbench/v4818_full.cpp premium_plus_combo_final/workbench/v4815_baseline.cpp
+          python premium_plus_combo_final/workbench/post_warrior_rightclick.py premium_plus_combo_final/workbench/v4818_full.cpp
+          python premium_plus_combo_final/workbench/post_warrior_defender_clean.py premium_plus_combo_final/workbench/v4818_full.cpp
+          python premium_plus_combo_final/workbench/post_clean_hotkeys.py premium_plus_combo_final/workbench/v4818_full.cpp
+          python premium_plus_combo_final/workbench/make_production_clean.py premium_plus_combo_final/workbench/v4818_full.cpp premium_plus_combo_final/workbench/v4818_prod.cpp
+          if($LASTEXITCODE){throw 'source generation failed'}
+
+      - name: Preserve existing macro workers
+        shell: pwsh
+        run: |
+          @'
+          import pathlib,hashlib
+          a=pathlib.Path('premium_plus_combo_final/workbench/v4815_baseline.cpp').read_text(encoding='utf-8')
+          b=pathlib.Path('premium_plus_combo_final/workbench/v4818_full.cpp').read_text(encoding='utf-8')
+          def fn(t,sig):
+              p=t.index(sig);q=t.index('{',p);d=0
+              for i in range(q,len(t)):
+                  if t[i]=='{':d+=1
+                  elif t[i]=='}':
+                      d-=1
+                      if d==0:return t[p:i+1]
+              raise RuntimeError(sig)
+          protected=['void MinorWorker()','void RWorker()','void CureWorker()','void ExecuteAttack(const AttackSettings& a)','void AttackWorker()','void WsWorker()','void VitalsWorker()','void MobSkillWorker()','void MobChaseWorker()','void MobScrollWorker()','void MobPriestWorker()','void WarriorWorker()']
+          # Warrior does not exist in v4.8.15, so compare all older workers only.
+          for sig in protected[:-1]:
+              x,y=fn(a,sig),fn(b,sig)
+              if x!=y:raise SystemExit('protected worker changed: '+sig)
+              print('UNCHANGED='+sig+' '+hashlib.sha256(x.encode()).hexdigest())
+          print('LEGACY_WORKERS_UNCHANGED=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'legacy preservation failed'}
+
+      - name: Architecture source audit
+        shell: pwsh
+        run: |
+          @'
+          import pathlib
+          s=pathlib.Path('premium_plus_combo_final/workbench/v4818_full.cpp').read_text(encoding='utf-8')
+          def fn(sig):
+              p=s.index(sig);q=s.index('{',p);d=0
+              for i in range(q,len(s)):
+                  if s[i]=='{':d+=1
+                  elif s[i]=='}':
+                      d-=1
+                      if d==0:return s[p:i+1]
+              raise RuntimeError(sig)
+          main=fn('int APIENTRY wWinMain')
+          if 'SetWindowsHookExW(WH_KEYBOARD_LL,KeyboardProc' in main:raise SystemExit('runtime low-level keyboard hook remains')
+          if 'g_keyboardHook' in main:raise SystemExit('runtime hook handle remains in main')
+          for x in ['RegisterHotKey(g_ui.main','UnregisterHotKey(g_ui.main','WM_HOTKEY','WM_KEYDOWN','BeginHotkeyAssignment']:
+              if x not in s:raise SystemExit('clean hotkey architecture missing '+x)
+          w=fn('bool WarriorRightClickSlot')
+          for bad in ['GetCursorPos','SetCursorPos','MOUSEEVENTF_LEFTDOWN','MOUSEEVENTF_LEFTUP','mouse_event(']:
+              if bad in w:raise SystemExit('forbidden Warrior mouse path '+bad)
+          for good in ['MOUSEEVENTF_RIGHTDOWN','MOUSEEVENTF_RIGHTUP','SendInput']:
+              if good not in w:raise SystemExit('missing Warrior action '+good)
+          print('RUNTIME_LOW_LEVEL_KEYBOARD_HOOK=REMOVED')
+          print('STANDARD_REGISTERHOTKEY=PASS')
+          print('WARRIOR_RIGHT_CLICK_ONLY=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'architecture audit failed'}
+
+      - name: Build diagnostic and production EXEs
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="4.8.18.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"/>
+            <description>Premium Plus Combo v4.8.18</description>
+            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="asInvoker" uiAccess="false"/></requestedPrivileges></security></trustInfo>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content v4818.manifest -Encoding UTF8
+          @'
+          #include <windows.h>
+          1 VERSIONINFO
+          FILEVERSION 4,8,18,0
+          PRODUCTVERSION 4,8,18,0
+          FILEFLAGSMASK 0x3fL
+          FILEFLAGS 0x0L
+          FILEOS VOS_NT_WINDOWS32
+          FILETYPE VFT_APP
+          BEGIN
+            BLOCK "StringFileInfo"
+            BEGIN
+              BLOCK "040904B0"
+              BEGIN
+                VALUE "CompanyName", "Lefferion Prime\0"
+                VALUE "FileDescription", "Premium Plus Combo\0"
+                VALUE "FileVersion", "4.8.18.0\0"
+                VALUE "InternalName", "PremiumPlusCombo\0"
+                VALUE "OriginalFilename", "PremiumPlusCombo_v4.8.18.exe\0"
+                VALUE "ProductName", "Premium Plus Combo\0"
+                VALUE "ProductVersion", "4.8.18.0\0"
+              END
+            END
+            BLOCK "VarFileInfo"
+            BEGIN
+              VALUE "Translation", 0x0409, 1200
+            END
+          END
+          '@ | Set-Content v4818.rc -Encoding ASCII
+          rc.exe /nologo /fo v4818.res v4818.rc
+          if($LASTEXITCODE){throw 'resource compile failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX v4818_full.cpp /Fe:PremiumPlusCombo_v4.8.18_TEST.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT
+          if($LASTEXITCODE){throw 'diagnostic build failed'}
+          cl /nologo /std:c++17 /O2 /GL /Gy /Gw /sdl /guard:cf /MT /EHsc /utf-8 /DNOMINMAX v4818_prod.cpp v4818.res /Fe:PremiumPlusCombo_v4.8.18.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /LTCG /OPT:REF /OPT:ICF /INCREMENTAL:NO /SUBSYSTEM:WINDOWS /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /guard:cf /CETCOMPAT /Brepro /MANIFEST:NO
+          if($LASTEXITCODE){throw 'production build failed'}
+          mt.exe -manifest v4818.manifest "-outputresource:PremiumPlusCombo_v4.8.18.exe;#1"
+          if($LASTEXITCODE){throw 'manifest embed failed'}
+          mt.exe "-inputresource:PremiumPlusCombo_v4.8.18.exe;#1" -out:embedded.manifest
+          $em=Get-Content embedded.manifest -Raw
+          if($em -notmatch 'asInvoker'){throw 'asInvoker manifest missing'}
+          if($em -match 'requireAdministrator'){throw 'admin manifest unexpectedly present'}
+
+      - name: Windows RegisterHotKey API probe
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          @'
+          #include <windows.h>
+          int wmain(){const UINT keys[]={VK_CAPITAL,VK_F6,VK_F8,VK_F9,VK_F10,'X','C'};int id=100;for(UINT vk:keys){if(!RegisterHotKey(nullptr,id,MOD_NOREPEAT,vk))return (int)vk;UnregisterHotKey(nullptr,id);id++;}return 0;}
+          '@ | Set-Content hotkey_probe.cpp -Encoding ASCII
+          cl /nologo /EHsc hotkey_probe.cpp /Fe:hotkey_probe.exe user32.lib
+          if($LASTEXITCODE){throw 'hotkey probe compile failed'}
+          & .\hotkey_probe.exe
+          if($LASTEXITCODE){throw "RegisterHotKey API probe failed for VK $LASTEXITCODE"}
+
+      - name: Regression tests
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process .\PremiumPlusCombo_v4.8.18_TEST.exe -ArgumentList '--self-test' -Wait -PassThru;if($p.ExitCode){throw 'legacy test failed'}
+          $p=Start-Process .\PremiumPlusCombo_v4.8.18_TEST.exe -ArgumentList '--mob-model-test' -Wait -PassThru;if($p.ExitCode){throw 'mob test failed'}
+          $p=Start-Process .\PremiumPlusCombo_v4.8.18_TEST.exe -ArgumentList '--warrior-model-test' -Wait -PassThru;if($p.ExitCode){throw 'warrior test failed'}
+          $a=Get-Content self-test-report.txt -Raw;$m=Get-Content mob-model-test-report.txt -Raw;$w=Get-Content warrior-model-test-report.txt -Raw
+          if($a -notmatch 'PASSED=180'){throw '180 regression failed'}
+          if($m -notmatch 'PASSED=8'){throw 'mob regression failed'}
+          if($w -notmatch 'PASSED=8'){throw 'warrior regression failed'}
+
+      - name: Production import and PE audit
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          dumpbin /headers PremiumPlusCombo_v4.8.18.exe | Set-Content v4818-headers.txt
+          dumpbin /imports PremiumPlusCombo_v4.8.18.exe | Set-Content v4818-imports.txt
+          $h=Get-Content v4818-headers.txt -Raw;$i=Get-Content v4818-imports.txt -Raw
+          foreach($required in @('RegisterHotKey','UnregisterHotKey','SendInput','BitBlt','GetDIBits')){if($i -notmatch [regex]::Escape($required)){throw "required import missing: $required"}}
+          foreach($bad in @('SetWindowsHookExW','CallNextHookEx','UnhookWindowsHookEx','GetAsyncKeyState','GetCursorPos','SetCursorPos','WINHTTP.dll','WININET.dll','WS2_32.dll','CreateRemoteThread','WriteProcessMemory','VirtualAllocEx','OpenProcess','OpenFileMappingW')){if($i -match [regex]::Escape($bad)){throw "forbidden production import: $bad"}}
+          if($h -match 'E0000060'){throw 'RWX section found'}
+          if($h -notmatch 'Dynamic base'){throw 'ASLR missing'}
+          if($h -notmatch 'NX compatible'){throw 'NX missing'}
+          @'
+          import pathlib
+          b=pathlib.Path('PremiumPlusCombo_v4.8.18.exe').read_bytes()
+          for x in [b'--self-test',b'--transport-observer-test',b'--attack-observer-test',b'--auto-minor-observer-test',b'--cure-observer-test',b'--mob-model-test',b'--warrior-model-test',b'self-test-report.txt',b'mob-model-test-report.txt',b'warrior-model-test-report.txt']:
+              if x in b or x.decode().encode('utf-16le') in b:raise SystemExit('test data leaked '+repr(x))
+          print('PRODUCTION_TEST_SURFACE_STRIPPED=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'binary audit failed'}
+
+      - name: Microsoft Defender signature update and scan
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Continue'
+          Get-MpComputerStatus | Select-Object AntivirusEnabled,RealTimeProtectionEnabled,IoavProtectionEnabled,AntivirusSignatureVersion,AntivirusSignatureLastUpdated | Format-List | Out-File defender-status.txt
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(!(Test-Path $mp)){$mp=Get-ChildItem 'C:\ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe' -ErrorAction SilentlyContinue|Sort-Object FullName -Descending|Select-Object -First 1 -ExpandProperty FullName}
+          $result='UNAVAILABLE'
+          if($mp -and (Test-Path $mp)){
+            & $mp -SignatureUpdate 2>&1 | Tee-Object -FilePath defender-update-output.txt
+            $exe=(Resolve-Path '.\PremiumPlusCombo_v4.8.18.exe').Path
+            & $mp -Scan -ScanType 3 -File $exe -DisableRemediation 2>&1 | Tee-Object -FilePath defender-scan-output.txt
+            $text=if(Test-Path defender-scan-output.txt){Get-Content defender-scan-output.txt -Raw}else{''}
+            if($text -match 'found no threats'){$result='NO_THREATS'}elseif($text -match '(?i)(threat|virus|trojan|malware).*(found|detected)' -or $text -match '(?i)(found|detected).*(threat|virus|trojan|malware)'){$result='THREAT_REPORTED'}
+          }
+          "MICROSOFT_DEFENDER=$result"|Set-Content defender-result.txt
+          if($result -eq 'THREAT_REPORTED'){throw 'Microsoft Defender reported a threat'}
+          exit 0
+
+      - name: Release report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $sha=(Get-FileHash .\PremiumPlusCombo_v4.8.18.exe -Algorithm SHA256).Hash
+          $size=(Get-Item .\PremiumPlusCombo_v4.8.18.exe).Length
+          $sig=(Get-AuthenticodeSignature .\PremiumPlusCombo_v4.8.18.exe).Status
+          $def=if(Test-Path defender-result.txt){(Get-Content defender-result.txt -Raw).Trim()}else{'UNKNOWN'}
+          @"
+          Product=Premium Plus Combo
+          Version=4.8.18.0
+          LegacySelfTest=180/180 PASS
+          MobModelTest=8/8 PASS
+          WarriorModelTest=8/8 PASS
+          RuntimeKeyboardHook=REMOVED
+          OperationalHotkeys=RegisterHotKey
+          KeyAssignment=FocusedWindow_WM_KEYDOWN
+          RequireAdministrator=NO
+          Manifest=asInvoker
+          WarriorEquipAction=RIGHT_CLICK_ONLY
+          WarriorDragDrop=NONE
+          WarriorLeftClick=NONE
+          CursorPositionAPIs=NONE
+          ExistingMacroWorkers=UNCHANGED
+          NetworkImports=NONE
+          InjectionImports=NONE
+          RWXSections=NONE
+          ASLR=PASS
+          NX=PASS
+          $def
+          AuthenticodeStatus=$sig
+          EXE_SIZE=$size
+          EXE_SHA256=$sha
+          "@ | Set-Content V4818-REPORT.txt -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-v4.8.18-CLEAN-HOTKEYS
+          path: |
+            premium_plus_combo_final/workbench/PremiumPlusCombo_v4.8.18.exe
+            premium_plus_combo_final/workbench/V4818-REPORT.txt
+            premium_plus_combo_final/workbench/defender-result.txt
+            premium_plus_combo_final/workbench/defender-status.txt
+            premium_plus_combo_final/workbench/defender-scan-output.txt
+            premium_plus_combo_final/workbench/defender-update-output.txt
+            premium_plus_combo_final/workbench/v4818-imports.txt
+            premium_plus_combo_final/workbench/v4818-headers.txt
+            premium_plus_combo_final/workbench/embedded.manifest
+            premium_plus_combo_final/workbench/self-test-report.txt
+            premium_plus_combo_final/workbench/mob-model-test-report.txt
+            premium_plus_combo_final/workbench/warrior-model-test-report.txt
+          retention-days: 14
