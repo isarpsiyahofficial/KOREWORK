@@ -1,0 +1,28 @@
+name: Export Makro2 v4.8.15 Generated Source
+on:
+  push:
+    branches: [ warrior-v4816-work ]
+    paths: [ '.github/workflows/makro2-export-v4815-generated.yml' ]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate current v4.8.15 source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
+          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base premium_plus_combo_final/workbench/makro2_v4815_full.cpp
+          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py premium_plus_combo_final/workbench/makro2_v4815_full.cpp
+          python premium_plus_combo_final/workbench/post_mob_r_chase.py premium_plus_combo_final/workbench/makro2_v4815_full.cpp
+          python premium_plus_combo_final/workbench/post_ui_compact_tabs.py premium_plus_combo_final/workbench/makro2_v4815_full.cpp
+          if($LASTEXITCODE){throw 'v4815 generation failed'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Makro2-v4815-generated-source
+          path: premium_plus_combo_final/workbench/makro2_v4815_full.cpp
+          retention-days: 1
