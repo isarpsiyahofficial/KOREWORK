@@ -1,4 +1,4 @@
-name: Makro2 v4.8.13 MOB ATTACK Dynamic
+name: Makro2 v4.8.14 Production Clean
 
 on:
   push:
@@ -8,6 +8,7 @@ on:
       - 'premium_plus_combo_final/workbench/apply_mob_dynamic.py'
       - 'premium_plus_combo_final/workbench/post_mob_dynamic_fix.py'
       - 'premium_plus_combo_final/workbench/post_mob_r_chase.py'
+      - 'premium_plus_combo_final/workbench/make_production_clean.py'
       - '.github/workflows/makro2-v4813-mob-attack-dynamic.yml'
   workflow_dispatch:
 
@@ -15,14 +16,15 @@ permissions:
   contents: read
 
 jobs:
-  build-test:
+  build-test-scan:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
-      - name: Verify known-good base and apply isolated patch
+
+      - name: Verify known-good base and generate full plus clean sources
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -36,93 +38,181 @@ jobs:
           assert sha=='3AECB38864D0C248F926C9F15A8FF7F5BE4A1636ACAB966ADC40DA350C142A42',sha
           '@ | python -
           if($LASTEXITCODE){throw 'known-good base verification failed'}
-          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base premium_plus_combo_final/workbench/makro2_v4813_mob.cpp
-          if($LASTEXITCODE){throw 'patch failed'}
-          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py premium_plus_combo_final/workbench/makro2_v4813_mob.cpp
+          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base premium_plus_combo_final/workbench/makro2_v4814_full.cpp
+          if($LASTEXITCODE){throw 'MOB patch failed'}
+          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py premium_plus_combo_final/workbench/makro2_v4814_full.cpp
           if($LASTEXITCODE){throw 'post patch failed'}
-          python premium_plus_combo_final/workbench/post_mob_r_chase.py premium_plus_combo_final/workbench/makro2_v4813_mob.cpp
+          python premium_plus_combo_final/workbench/post_mob_r_chase.py premium_plus_combo_final/workbench/makro2_v4814_full.cpp
           if($LASTEXITCODE){throw 'R chase patch failed'}
-          $txt=Get-Content premium_plus_combo_final/workbench/makro2_v4813_mob.cpp -Raw
-          foreach($x in @('MOB ATTACK','+ Skill Ekle','+ Scroll Ekle','Random kullan','MobAnchorDistance','kPositionMappingName','PRIEST AKTİF','NextEnabledSkill','RunMobModelTest','MobChaseWorker','MobChaseKey')){if($txt -notmatch [regex]::Escape($x)){throw "generated source missing $x"}}
-      - name: Build x64 portable EXE
+          python premium_plus_combo_final/workbench/make_production_clean.py premium_plus_combo_final/workbench/makro2_v4814_full.cpp premium_plus_combo_final/workbench/makro2_v4814_prod.cpp
+          if($LASTEXITCODE){throw 'production cleanup failed'}
+          $full=Get-Content premium_plus_combo_final/workbench/makro2_v4814_full.cpp -Raw
+          $prod=Get-Content premium_plus_combo_final/workbench/makro2_v4814_prod.cpp -Raw
+          foreach($x in @('MOB ATTACK','+ Skill Ekle','+ Scroll Ekle','Random kullan','MobAnchorDistance','PRIEST AKTİF','MobChaseWorker','MobChaseKey')){if($prod -notmatch [regex]::Escape($x)){throw "production source missing $x"}}
+          foreach($x in @('--self-test','--transport-observer-test','--attack-observer-test','--attack-z-off-observer-test','--auto-minor-observer-test','--cure-observer-test','--mob-model-test')){if($prod -match [regex]::Escape($x)){throw "test dispatcher leaked into production source: $x"}}
+          if($prod -notmatch [regex]::Escape('bool ReadPosition(double&,double&){return false;}')){throw 'unused position mapping was not fail-closed'}
+
+      - name: Build test EXE and hardened production EXE
         shell: pwsh
         working-directory: premium_plus_combo_final/workbench
         run: |
           $ErrorActionPreference='Stop'
           @'
-          <?xml version="1.0" encoding="UTF-8" standalone="yes"?><assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.13.1" processorArchitecture="amd64" name="Makro2" type="win32"/><description>Makro2 MOB ATTACK R Chase</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
-          '@ | Set-Content v4813.manifest -Encoding UTF8
-          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX makro2_v4813_mob.cpp /Fe:Makro2_v4.8.13_MOB_ATTACK_Test.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="4.8.14.0" processorArchitecture="amd64" name="Makro2" type="win32"/>
+            <description>Premium Plus Combo v4.8.14</description>
+            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security></trustInfo>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content v4814.manifest -Encoding UTF8
+          @'
+          #include <windows.h>
+          1 VERSIONINFO
+          FILEVERSION 4,8,14,0
+          PRODUCTVERSION 4,8,14,0
+          FILEFLAGSMASK 0x3fL
+          FILEFLAGS 0x0L
+          FILEOS VOS_NT_WINDOWS32
+          FILETYPE VFT_APP
+          FILESUBTYPE 0x0L
+          BEGIN
+            BLOCK "StringFileInfo"
+            BEGIN
+              BLOCK "040904B0"
+              BEGIN
+                VALUE "CompanyName", "Lefferion Prime\0"
+                VALUE "FileDescription", "Premium Plus Combo\0"
+                VALUE "FileVersion", "4.8.14.0\0"
+                VALUE "InternalName", "Makro2\0"
+                VALUE "OriginalFilename", "Makro2_v4.8.14_CLEAN.exe\0"
+                VALUE "ProductName", "Premium Plus Combo\0"
+                VALUE "ProductVersion", "4.8.14.0\0"
+              END
+            END
+            BLOCK "VarFileInfo"
+            BEGIN
+              VALUE "Translation", 0x0409, 1200
+            END
+          END
+          '@ | Set-Content v4814.rc -Encoding ASCII
+          rc.exe /nologo /fo v4814.res v4814.rc
+          if($LASTEXITCODE){throw 'version resource compile failed'}
+
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX makro2_v4814_full.cpp /Fe:Makro2_v4.8.14_TEST.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT
           if($LASTEXITCODE){throw 'test build failed'}
-          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX makro2_v4813_mob.cpp /Fe:Makro2_v4.8.13_MOB_ATTACK_R_CHASE.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
-          if($LASTEXITCODE){throw 'final build failed'}
-          mt.exe -manifest v4813.manifest "-outputresource:Makro2_v4.8.13_MOB_ATTACK_R_CHASE.exe;#1"
-          if($LASTEXITCODE){throw 'manifest failed'}
-      - name: Legacy regression and new executable model checks
+
+          cl /nologo /std:c++17 /O2 /GL /Gy /Gw /sdl /guard:cf /MT /EHsc /utf-8 /DNOMINMAX makro2_v4814_prod.cpp v4814.res /Fe:Makro2_v4.8.14_CLEAN.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /LTCG /OPT:REF /OPT:ICF /INCREMENTAL:NO /SUBSYSTEM:WINDOWS /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /guard:cf /CETCOMPAT /Brepro /MANIFEST:EMBED /MANIFESTINPUT:v4814.manifest
+          if($LASTEXITCODE){throw 'production build failed'}
+
+      - name: Run complete regression suite on diagnostic build
         shell: pwsh
         working-directory: premium_plus_combo_final/workbench
         run: |
           $ErrorActionPreference='Stop'
-          $p=Start-Process .\Makro2_v4.8.13_MOB_ATTACK_Test.exe -ArgumentList '--self-test' -Wait -PassThru
+          $p=Start-Process .\Makro2_v4.8.14_TEST.exe -ArgumentList '--self-test' -Wait -PassThru
           if($p.ExitCode){throw "legacy self-test failed $($p.ExitCode)"}
           $r=Get-Content self-test-report.txt -Raw
           foreach($x in @('TOTAL=180','PASSED=180','AttackOrderedThreeSkills=PASS','MinorReferenceSequenceModel=PASS','ScanCodeTransport=PASS','AutoMinorStartAt30=PASS','AutoMinorStopAt75=PASS')){if($r -notmatch [regex]::Escape($x)){throw "legacy regression missing $x"}}
-          $p2=Start-Process .\Makro2_v4.8.13_MOB_ATTACK_Test.exe -ArgumentList '--mob-model-test' -Wait -PassThru
+          $p2=Start-Process .\Makro2_v4.8.14_TEST.exe -ArgumentList '--mob-model-test' -Wait -PassThru
           if($p2.ExitCode){throw "MOB model test failed $($p2.ExitCode)"}
           $m=Get-Content mob-model-test-report.txt -Raw
           foreach($x in @('TOTAL=8','PASSED=8','AttackDynamicSequential=PASS','MobDynamicSequential=PASS','MobRandomNoImmediateRepeat=PASS','MobRangeEuclidean345=PASS','PriestSingleThresholdEdge=PASS','IndependentScrollIntervals=PASS','MobChaseUsesR=PASS','MobChaseNeverUsesW=PASS')){if($m -notmatch [regex]::Escape($x)){throw "MOB model regression missing $x"}}
-          $src=Get-Content makro2_v4813_mob.cpp -Raw
-          foreach($x in @('std::vector<SkillEntry> extraSkills','bool randomSkills=false','ExtraSkillCount','ScrollCount','NextAttackSkill','NextMobSkill','m.priestEnabled','MobAnchorDistance','ReferenceTapKeyUnlocked(MobChaseKey())')){if($src -notmatch [regex]::Escape($x)){throw "model check missing $x"}}
-          @'
-          import pathlib,re
-          s=pathlib.Path('makro2_v4813_mob.cpp').read_text(encoding='utf-8')
-          a=s.index('void MobChaseWorker()');q=s.index('{',a);d=0;end=None
-          for i in range(q,len(s)):
-              if s[i]=='{': d+=1
-              elif s[i]=='}':
-                  d-=1
-                  if d==0: end=i+1; break
-          assert end is not None
-          body=s[a:end]
-          assert "'W'" not in body and 'VK_W' not in body, 'MOB chase contains W'
-          assert "MobChaseKey(){return 'R';}" in s, 'MOB chase is not R'
-          '@ | python -
-          if($LASTEXITCODE){throw 'R-only chase static guard failed'}
-          dumpbin /headers Makro2_v4.8.13_MOB_ATTACK_R_CHASE.exe | Set-Content headers.txt
-          dumpbin /imports Makro2_v4.8.13_MOB_ATTACK_R_CHASE.exe | Set-Content imports.txt
-          $h=Get-Content headers.txt -Raw;$i=Get-Content imports.txt -Raw
+
+      - name: Verify production binary is stripped and hardened
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          dumpbin /headers Makro2_v4.8.14_CLEAN.exe | Set-Content clean-headers.txt
+          dumpbin /imports Makro2_v4.8.14_CLEAN.exe | Set-Content clean-imports.txt
+          $h=Get-Content clean-headers.txt -Raw
+          $i=Get-Content clean-imports.txt -Raw
           if($h -notmatch 'machine \(x64\)'){throw 'not x64'}
           if($h -match 'E0000060'){throw 'RWX section found'}
-          foreach($bad in @('WINHTTP.dll','WININET.dll','WS2_32.dll','VCRUNTIME140.dll','MSVCP140.dll')){if($i -match [regex]::Escape($bad)){throw "unexpected dependency $bad"}}
-          $sha=(Get-FileHash Makro2_v4.8.13_MOB_ATTACK_R_CHASE.exe -Algorithm SHA256).Hash
+          foreach($required in @('Dynamic base','NX compatible')){if($h -notmatch $required){throw "missing hardening flag $required"}}
+          foreach($bad in @('WINHTTP.dll','WININET.dll','WS2_32.dll','CreateRemoteThread','WriteProcessMemory','VirtualAllocEx','OpenProcess')){if($i -match [regex]::Escape($bad)){throw "suspicious import present: $bad"}}
+          if($i -match [regex]::Escape('OpenFileMappingW')){throw 'unused optional position mapping remained in production binary'}
+          @'
+          import pathlib
+          b=pathlib.Path('Makro2_v4.8.14_CLEAN.exe').read_bytes()
+          forbidden=[
+            b'--self-test', b'--transport-observer-test', b'--attack-observer-test',
+            b'--attack-z-off-observer-test', b'--auto-minor-observer-test', b'--cure-observer-test',
+            b'--mob-model-test', b'self-test-report.txt', b'transport-observer-report.txt',
+            b'attack-observer-report.txt', b'auto-minor-observer-report.txt', b'cure-observer-report.txt',
+            b'mob-model-test-report.txt'
+          ]
+          for x in forbidden:
+              if x in b or x.decode('ascii').encode('utf-16le') in b:
+                  raise SystemExit('test-only artifact leaked into production binary: '+repr(x))
+          print('PRODUCTION_TEST_SURFACE_STRIPPED=PASS')
+          '@ | python -
+          if($LASTEXITCODE){throw 'production strip binary check failed'}
+          $sig=Get-AuthenticodeSignature .\Makro2_v4.8.14_CLEAN.exe
+          "AUTHENTICODE_STATUS=$($sig.Status)" | Set-Content clean-signature.txt
+          $sha=(Get-FileHash .\Makro2_v4.8.14_CLEAN.exe -Algorithm SHA256).Hash
+          "EXE_SHA256=$sha" | Set-Content clean-sha256.txt
+
+      - name: Scan exact production EXE with Microsoft Defender
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path '.\Makro2_v4.8.14_CLEAN.exe').Path
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(!(Test-Path $mp)){
+            $mp=Get-ChildItem 'C:\ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe' -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          }
+          if(!$mp -or !(Test-Path $mp)){throw 'Microsoft Defender scanner unavailable'}
+          try { Update-MpSignature -ErrorAction Continue | Out-Null } catch {}
+          & $mp -Scan -ScanType 3 -File $exe -DisableRemediation 2>&1 | Tee-Object -FilePath defender-scan-output.txt
+          $code=$LASTEXITCODE
+          if($code -ne 0){throw "Microsoft Defender scan exit code $code"}
+          $out=Get-Content defender-scan-output.txt -Raw
+          if($out -notmatch 'found no threats'){throw 'Defender did not return clean result'}
+          'MICROSOFT_DEFENDER=NO_THREATS' | Set-Content defender-result.txt
+
+      - name: Produce release report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $sha=(Get-FileHash .\Makro2_v4.8.14_CLEAN.exe -Algorithm SHA256).Hash
+          $size=(Get-Item .\Makro2_v4.8.14_CLEAN.exe).Length
+          $sig=(Get-AuthenticodeSignature .\Makro2_v4.8.14_CLEAN.exe).Status
           @"
-          Product=Makro2
-          Version=4.8.13.1
+          Product=Premium Plus Combo / Makro2
+          Version=4.8.14.0
           KnownGoodBaseSHA256=3AECB38864D0C248F926C9F15A8FF7F5BE4A1636ACAB966ADC40DA350C142A42
           LegacySelfTest=180/180 PASS
           MobModelTest=8/8 PASS
-          DynamicAttackSkills=PASS
-          AttackSequentialDefault=PASS
-          AttackRandomOptional=PASS
-          MobDynamicSkills=PASS
-          MobDynamicScrolls=PASS
-          MobPriestIndependentEnable=PASS
-          MobPriestSingleThreshold=PASS
-          OpenKOWorldRangeModel=PASS
           MobChaseCommand=R
           MobChaseUsesW=NO
-          LegacyAttackWComboPreserved=PASS
-          DynamicReleaseCleanup=PASS
-          MobFifoWaitOutsideLock=PASS
-          PortableStaticRuntime=PASS
+          ProductionTestDispatchers=REMOVED
+          ProductionObserverTestSurface=DEAD_STRIPPED
+          OptionalUnusedPositionMapping=REMOVED_FROM_FINAL_IMPORTS
+          NetworkImports=NONE
+          InjectionImports=NONE
+          RWXSections=NONE
+          ASLR=PASS
+          NX=PASS
+          CFG=ENABLED
+          CETCOMPAT=ENABLED
+          MicrosoftDefenderManualScan=NO_THREATS
+          AuthenticodeStatus=$sig
+          EXE_SIZE=$size
           EXE_SHA256=$sha
-          "@ | Set-Content MOB-ATTACK-REPORT.txt -Encoding UTF8
+          "@ | Set-Content CLEAN-BUILD-REPORT.txt -Encoding UTF8
+
       - uses: actions/upload-artifact@v4
         with:
-          name: Makro2-v4.8.13.1-MOB-ATTACK-R-Chase
+          name: Makro2-v4.8.14-CLEAN
           path: |
-            premium_plus_combo_final/workbench/Makro2_v4.8.13_MOB_ATTACK_R_CHASE.exe
-            premium_plus_combo_final/workbench/MOB-ATTACK-REPORT.txt
+            premium_plus_combo_final/workbench/Makro2_v4.8.14_CLEAN.exe
+            premium_plus_combo_final/workbench/CLEAN-BUILD-REPORT.txt
+            premium_plus_combo_final/workbench/defender-scan-output.txt
             premium_plus_combo_final/workbench/self-test-report.txt
             premium_plus_combo_final/workbench/mob-model-test-report.txt
+            premium_plus_combo_final/workbench/clean-imports.txt
+            premium_plus_combo_final/workbench/clean-headers.txt
           retention-days: 14
