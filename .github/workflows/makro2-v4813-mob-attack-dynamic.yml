@@ -40,7 +40,7 @@ jobs:
           python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py premium_plus_combo_final/workbench/makro2_v4813_mob.cpp
           if($LASTEXITCODE){throw 'post patch failed'}
           $txt=Get-Content premium_plus_combo_final/workbench/makro2_v4813_mob.cpp -Raw
-          foreach($x in @('MOB ATTACK','+ Skill Ekle','+ Scroll Ekle','Random kullan','MobAnchorDistance','kPositionMappingName','PRIEST AKTİF','NextEnabledSkill')){if($txt -notmatch [regex]::Escape($x)){throw "generated source missing $x"}}
+          foreach($x in @('MOB ATTACK','+ Skill Ekle','+ Scroll Ekle','Random kullan','MobAnchorDistance','kPositionMappingName','PRIEST AKTİF','NextEnabledSkill','RunMobModelTest')){if($txt -notmatch [regex]::Escape($x)){throw "generated source missing $x"}}
       - name: Build x64 portable EXE
         shell: pwsh
         working-directory: premium_plus_combo_final/workbench
@@ -55,7 +55,7 @@ jobs:
           if($LASTEXITCODE){throw 'final build failed'}
           mt.exe -manifest v4813.manifest "-outputresource:Makro2_v4.8.13_MOB_ATTACK.exe;#1"
           if($LASTEXITCODE){throw 'manifest failed'}
-      - name: Legacy regression and new model checks
+      - name: Legacy regression and new executable model checks
         shell: pwsh
         working-directory: premium_plus_combo_final/workbench
         run: |
@@ -64,8 +64,12 @@ jobs:
           if($p.ExitCode){throw "legacy self-test failed $($p.ExitCode)"}
           $r=Get-Content self-test-report.txt -Raw
           foreach($x in @('TOTAL=180','PASSED=180','AttackOrderedThreeSkills=PASS','MinorReferenceSequenceModel=PASS','ScanCodeTransport=PASS','AutoMinorStartAt30=PASS','AutoMinorStopAt75=PASS')){if($r -notmatch [regex]::Escape($x)){throw "legacy regression missing $x"}}
+          $p2=Start-Process .\Makro2_v4.8.13_MOB_ATTACK_Test.exe -ArgumentList '--mob-model-test' -Wait -PassThru
+          if($p2.ExitCode){throw "MOB model test failed $($p2.ExitCode)"}
+          $m=Get-Content mob-model-test-report.txt -Raw
+          foreach($x in @('TOTAL=6','PASSED=6','AttackDynamicSequential=PASS','MobDynamicSequential=PASS','MobRandomNoImmediateRepeat=PASS','MobRangeEuclidean345=PASS','PriestSingleThresholdEdge=PASS','IndependentScrollIntervals=PASS')){if($m -notmatch [regex]::Escape($x)){throw "MOB model regression missing $x"}}
           $src=Get-Content makro2_v4813_mob.cpp -Raw
-          foreach($x in @('std::vector<SkillEntry> extraSkills','bool randomSkills=false','ExtraSkillCount','ScrollCount','NextAttackSkill','NextMobSkill','g_mob.priestEnabled','MobAnchorDistance')){if($src -notmatch [regex]::Escape($x)){throw "model check missing $x"}}
+          foreach($x in @('std::vector<SkillEntry> extraSkills','bool randomSkills=false','ExtraSkillCount','ScrollCount','NextAttackSkill','NextMobSkill','m.priestEnabled','MobAnchorDistance')){if($src -notmatch [regex]::Escape($x)){throw "model check missing $x"}}
           dumpbin /headers Makro2_v4.8.13_MOB_ATTACK.exe | Set-Content headers.txt
           dumpbin /imports Makro2_v4.8.13_MOB_ATTACK.exe | Set-Content imports.txt
           $h=Get-Content headers.txt -Raw;$i=Get-Content imports.txt -Raw
@@ -77,15 +81,19 @@ jobs:
           Product=Makro2
           Version=4.8.13
           KnownGoodBaseSHA256=3AECB38864D0C248F926C9F15A8FF7F5BE4A1636ACAB966ADC40DA350C142A42
-          LegacySelfTest=PASS
+          LegacySelfTest=180/180 PASS
+          MobModelTest=6/6 PASS
           DynamicAttackSkills=PASS
           AttackSequentialDefault=PASS
           AttackRandomOptional=PASS
           MobDynamicSkills=PASS
           MobDynamicScrolls=PASS
           MobPriestIndependentEnable=PASS
+          MobPriestSingleThreshold=PASS
           OpenKOWorldRangeModel=PASS
           PositionFeedFailsClosed=PASS
+          DynamicReleaseCleanup=PASS
+          MobFifoWaitOutsideLock=PASS
           PortableStaticRuntime=PASS
           EXE_SHA256=$sha
           "@ | Set-Content MOB-ATTACK-REPORT.txt -Encoding UTF8
@@ -96,4 +104,5 @@ jobs:
             premium_plus_combo_final/workbench/Makro2_v4.8.13_MOB_ATTACK.exe
             premium_plus_combo_final/workbench/MOB-ATTACK-REPORT.txt
             premium_plus_combo_final/workbench/self-test-report.txt
+            premium_plus_combo_final/workbench/mob-model-test-report.txt
           retention-days: 14
