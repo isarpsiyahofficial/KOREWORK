@@ -1,0 +1,75 @@
+name: PremiumPlus v4.8.24 MOB selector scenarios
+
+on:
+  push:
+    branches: [ premiumplus-v4824-warrior-timing-priest-mob-targeting ]
+    paths:
+      - 'premium_plus_combo_final/workbench/mob_selector_scenario_model.py'
+      - 'premium_plus_combo_final/workbench/mob_selector_manual_click_test.cpp'
+      - '.github/workflows/premiumplus-v4824-mob-selector-scenarios.yml'
+  workflow_dispatch:
+
+jobs:
+  scenario-tests:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Run 48 selector model scenarios
+        shell: pwsh
+        run: |
+          python premium_plus_combo_final/workbench/mob_selector_scenario_model.py
+          $r=Get-Content mob-selector-scenario-report.txt -Raw
+          if($r -notmatch 'TOTAL=48' -or $r -notmatch 'PASSED=48'){throw 'scenario model failed'}
+          foreach($x in @(
+            'BodyFullyHiddenNameplateStillSelects=PASS',
+            'NothingVisibleNoBlindClick=PASS',
+            'PlayerInsideMobRetryOffset=PASS',
+            'WrongTargetRejectedThenCorrect=PASS',
+            'NoTargetHpNoAttack=PASS',
+            'Range48Accepted=PASS',
+            'Range49Rejected=PASS',
+            'ExactModeChoosesPlainPride=PASS',
+            'ContainsModeAllowsPrideRandom=PASS',
+            'VisualFalsePositiveBlockedByName=PASS',
+            'OverlapExhaustFirstThenSecond=PASS')){
+            if($r -notmatch [regex]::Escape($x)){throw "missing $x"}
+          }
+      - name: Build real SendInput click harness
+        shell: pwsh
+        run: |
+          cl /nologo /std:c++17 /O2 /MT /EHsc /DUNICODE /D_UNICODE premium_plus_combo_final/workbench/mob_selector_manual_click_test.cpp /Fe:mob-selector-manual-click-test.exe user32.lib gdi32.lib /link /SUBSYSTEM:WINDOWS
+          if($LASTEXITCODE){throw 'manual click harness compile failed'}
+      - name: Run real manual mouse-selection scenarios
+        shell: pwsh
+        run: |
+          $p=Start-Process .\mob-selector-manual-click-test.exe -Wait -PassThru
+          if($p.ExitCode){if(Test-Path mob-selector-manual-click-report.txt){Get-Content mob-selector-manual-click-report.txt};throw "manual click test failed exit=$($p.ExitCode)"}
+          $r=Get-Content mob-selector-manual-click-report.txt -Raw
+          if($r -notmatch 'TOTAL=9' -or $r -notmatch 'PASSED=9'){Get-Content mob-selector-manual-click-report.txt;throw 'manual click 9/9 failed'}
+          foreach($n in @('Pride','Gluttony','Wrath','Sloth','Lust','Envy','Greed')){if($r -notmatch "ManualClick_$n=PASS"){throw "manual select missing $n"}}
+          if($r -notmatch 'WrongFirstThenCorrectRetry=PASS' -or $r -notmatch 'MissDoesNotSelectMob=PASS'){throw 'retry/miss scenario failed'}
+      - name: Build scenario report
+        shell: pwsh
+        run: |
+          @(
+            'Product=PremiumPlusCombo'
+            'Scope=v4.8.24 MOB target selection scenario gate'
+            'SelectorModel=48/48 PASS'
+            'RealSendInputManualClick=9/9 PASS'
+            'BodyOcclusionPolicy=body is secondary; nameplate/confirmation required'
+            'WrongTargetPolicy=no R or skills before independent target confirmation'
+            'ConfiguredBuiltinNames=Pride,Gluttony,Wrath,Sloth,Lust,Envy,Greed'
+            'RangeBoundary=48 accepted; 49 rejected in model'
+            'ExactName=Pride rejects Pride Random'
+            'ContainsName=Pride accepts Pride Random'
+          ) | Set-Content mob-selector-scenario-summary.txt -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlus-v4.8.24-MOB-selector-scenarios
+          path: |
+            mob-selector-scenario-report.txt
+            mob-selector-manual-click-report.txt
+            mob-selector-scenario-summary.txt
