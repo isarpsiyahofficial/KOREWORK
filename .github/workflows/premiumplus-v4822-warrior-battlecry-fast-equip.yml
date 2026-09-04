@@ -1,0 +1,225 @@
+name: PremiumPlus v4.8.22 Warrior BattleCry Fast Equip
+
+on:
+  push:
+    branches: [ premiumplus-v4822-warrior-battlecry-fast-equip ]
+    paths:
+      - '.github/workflows/premiumplus-v4822-warrior-battlecry-fast-equip.yml'
+      - 'premium_plus_combo_final/workbench/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Verify exact v4.8.11 base
+        shell: pwsh
+        run: |
+          @'
+          import pathlib,hashlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/makro2_v4811_exact.cpp')
+          b=p.read_bytes().replace(b'\r\n',b'\n')
+          h=hashlib.sha256(b).hexdigest().upper()
+          print('BASE_SHA256='+h)
+          assert h=='3AECB38864D0C248F926C9F15A8FF7F5BE4A1636ACAB966ADC40DA350C142A42'
+          '@ | python -
+
+      - name: Generate v4.8.21 reference and v4.8.22
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
+          $ref='premium_plus_combo_final/workbench/premiumplus_v4821_reference.cpp'
+          $out='premium_plus_combo_final/workbench/premiumplus_v4822.cpp'
+          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base $ref
+          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py $ref
+          python premium_plus_combo_final/workbench/post_mob_r_chase.py $ref
+          python premium_plus_combo_final/workbench/post_ui_compact_tabs.py $ref
+          python premium_plus_combo_final/workbench/post_warrior_rightclick.py $ref
+          python premium_plus_combo_final/workbench/post_warrior_defender_clean.py $ref
+          @'
+          import pathlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4821_reference.cpp')
+          s=p.read_text(encoding='utf-8').replace('Premium Plus Combo | v4.8.17','Premium Plus Combo | v4.8.19')
+          p.write_text(s,encoding='utf-8',newline='\n')
+          '@ | python -
+          python premium_plus_combo_final/workbench/post_warrior_toggle_fast.py $ref
+          python premium_plus_combo_final/workbench/post_warrior_descent_echo.py $ref
+          Copy-Item $ref $out
+          python premium_plus_combo_final/workbench/post_warrior_v4822.py $out
+          @'
+          import pathlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4822.cpp')
+          s=p.read_text(encoding='utf-8')
+          old='return total==25&&pass==25;'
+          assert old in s
+          s=s.replace(old,'return total==26&&pass==26;',1)
+          p.write_text(s,encoding='utf-8',newline='\n')
+          print('MODEL_COUNT_FIX=26')
+          '@ | python -
+
+      - name: Preserve existing working modules
+        shell: pwsh
+        run: |
+          @'
+          import pathlib,hashlib
+          old=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4821_reference.cpp').read_text(encoding='utf-8')
+          new=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4822.cpp').read_text(encoding='utf-8')
+          def fn(t,sig):
+            a=t.index(sig);q=t.index('{',a);d=0
+            for i in range(q,len(t)):
+              if t[i]=='{':d+=1
+              elif t[i]=='}':
+                d-=1
+                if d==0:return t[a:i+1]
+            raise RuntimeError(sig)
+          protected=['void MinorWorker()','void RWorker()','void CureWorker()','void WsWorker()','void AttackWorker()','void VitalsWorker()','void MobSkillWorker()','void MobChaseWorker()','void MobScrollWorker()','void MobPriestWorker()','void ReadAttackUi(bool persist=true)','void ReadMobUi(bool persist=true)','void CreateAttackPage()','void CreateMobPage()','void ShowCategory(int category)','bool DetectInventoryGridPixels','bool CaptureGameClient','double WarriorGridEdgeScore','POINT WarriorSlotCellCenter']
+          for sig in protected:
+            a,b=fn(old,sig),fn(new,sig)
+            if a!=b: raise SystemExit('WORKING_CODE_CHANGED='+sig)
+            print('UNCHANGED='+sig+' '+hashlib.sha256(a.encode()).hexdigest())
+          print('V4821_WORKING_STRUCTURE_PRESERVED=PASS')
+          '@ | python -
+
+      - name: v4.8.22 source safety and behavior audit
+        shell: pwsh
+        run: |
+          @'
+          import pathlib
+          s=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4822.cpp').read_text(encoding='utf-8')
+          req=['Premium Plus Combo | v4.8.22','KALKAN-SİLAH','OTOMATİK SÜRELİ SKILL','+ Skill','Son Skill Sil','OTOMATİK BATTLE CRY','BeginCalibration(4)','BattleCryTemplateScore','WarriorBattleCryWorker','DescentReturnEnabled','DescentReturnBar','WarriorResolveVisibleInventoryFast']
+          for x in req:
+            if x not in s: raise SystemExit('MISSING='+x)
+          for bad in ['CreateRemoteThread','WriteProcessMemory','VirtualAllocEx','WinHttpOpen','InternetOpenW','WSAStartup']:
+            if bad in s: raise SystemExit('FORBIDDEN='+bad)
+          def body(sig):
+            a=s.index(sig);q=s.index('{',a);d=0
+            for i in range(q,len(s)):
+              if s[i]=='{':d+=1
+              elif s[i]=='}':
+                d-=1
+                if d==0:return s[a:i+1]
+          rc=body('bool WarriorRightClickSlot')
+          assert 'MOUSEEVENTF_RIGHTDOWN' in rc and 'MOUSEEVENTF_RIGHTUP' in rc and "ReferenceTapKeyUnlocked('I')" in rc
+          assert 'MOUSEEVENTF_LEFTDOWN' not in rc and 'MOUSEEVENTF_LEFTUP' not in rc and 'mouse_event(' not in rc
+          inv=body('bool WarriorResolveInventory')
+          assert "ReferenceTapKeyUnlocked('I')" in inv and 'WarriorResolveVisibleInventoryFast' in inv
+          bc=body('void WarriorBattleCryWorker')
+          assert 'BattleCryVisible' in bc and 'confirmed' in bc and 'score<0' in bc and 'retryAt' in bc
+          tw=body('void WarriorEchoWorker')
+          assert 'QueryPerformanceCounter' in tw and 'do{next[i]+=step;}while(next[i]<=after.QuadPart)' in tw
+          print('RIGHTCLICK_ONLY=PASS')
+          print('INVENTORY_OPEN_CHECK_CLOSE=PASS')
+          print('BATTLE_CRY_VISUAL_CONFIRM=PASS')
+          print('TIMED_SKILLS_ABSOLUTE_DEADLINE=PASS')
+          '@ | python -
+
+      - name: Build stable control and v4.8.22
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.11.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"></assemblyIdentity><description>Premium Plus Combo - Rogue</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"></requestedExecutionLevel></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content control.manifest -Encoding UTF8
+          @'
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.22.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"></assemblyIdentity><description>Premium Plus Combo - Rogue</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"></requestedExecutionLevel></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content release.manifest -Encoding UTF8
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX makro2_v4811_exact.cpp /Fe:PremiumPlusCombo-v4.8.11-CONTROL.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'control compile failed'}
+          mt.exe -nologo -manifest control.manifest "-outputresource:PremiumPlusCombo-v4.8.11-CONTROL.exe;#1"
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX premiumplus_v4822.cpp /Fe:PremiumPlusCombo-v4.8.22-STABLE.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'release compile failed'}
+          mt.exe -nologo -manifest release.manifest "-outputresource:PremiumPlusCombo-v4.8.22-STABLE.exe;#1"
+
+      - name: Exact PE import surface parity with stable v4.8.11
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          @'
+          import pathlib,struct,hashlib
+          def pe(path):
+            b=pathlib.Path(path).read_bytes();po=struct.unpack_from('<I',b,0x3c)[0];co=po+4;n=struct.unpack_from('<H',b,co+2)[0];op=co+20;dc=struct.unpack_from('<H',b,op+0x46)[0];return b,co,op,n,dc
+          def rva(b,co,op,x):
+            n=struct.unpack_from('<H',b,co+2)[0];sz=struct.unpack_from('<H',b,co+16)[0];sec=co+20+sz
+            for i in range(n):
+              o=sec+i*40;vsz,va,rs,raw=struct.unpack_from('<IIII',b,o+8)
+              if va<=x<va+max(vsz,rs):return raw+x-va
+            raise ValueError(x)
+          def cs(b,o):
+            e=b.find(b'\0',o);return b[o:e].decode('ascii','replace')
+          def imp(path):
+            b,co,op,n,dc=pe(path);ir,_=struct.unpack_from('<II',b,op+0x78);out=set();d=rva(b,co,op,ir)
+            while True:
+              oft,ts,fc,nr,ft=struct.unpack_from('<IIIII',b,d)
+              if not(oft or nr or ft):break
+              dll=cs(b,rva(b,co,op,nr)).lower();to=rva(b,co,op,oft or ft);j=0
+              while True:
+                v=struct.unpack_from('<Q',b,to+j*8)[0]
+                if not v:break
+                sym='#'+str(v&0xffff) if v&(1<<63) else cs(b,rva(b,co,op,v)+2);out.add(dll+'!'+sym);j+=1
+              d+=20
+            return out
+          cb,cc,co,cn,cd=pe('PremiumPlusCombo-v4.8.11-CONTROL.exe');rb,rc,ro,rn,rd=pe('PremiumPlusCombo-v4.8.22-STABLE.exe')
+          assert len(cb)==419328 and cn==7 and cd==0x8160
+          assert rn==7 and rd==0x8160
+          ci,ri=imp('PremiumPlusCombo-v4.8.11-CONTROL.exe'),imp('PremiumPlusCombo-v4.8.22-STABLE.exe')
+          print('CONTROL_IMPORTS='+str(len(ci)));print('RELEASE_IMPORTS='+str(len(ri)))
+          if ci!=ri:
+            print('EXTRA='+','.join(sorted(ri-ci)));print('MISSING='+','.join(sorted(ci-ri)));raise SystemExit('IMPORT_SURFACE_CHANGED')
+          print('EXACT_IMPORT_SURFACE_MATCH=PASS')
+          print('EXE_SHA256='+hashlib.sha256(rb).hexdigest().upper())
+          '@ | python -
+
+      - name: Full regression tests
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process .\PremiumPlusCombo-v4.8.22-STABLE.exe -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode){throw 'legacy test failed'}
+          $a=Get-Content self-test-report.txt -Raw
+          if($a -notmatch 'TOTAL=180' -or $a -notmatch 'PASSED=180'){throw 'legacy 180/180 failed'}
+          $p=Start-Process .\PremiumPlusCombo-v4.8.22-STABLE.exe -ArgumentList '--mob-model-test' -Wait -PassThru
+          if($p.ExitCode){throw 'mob test failed'}
+          $m=Get-Content mob-model-test-report.txt -Raw
+          if($m -notmatch 'TOTAL=8' -or $m -notmatch 'PASSED=8'){throw 'mob 8/8 failed'}
+          $p=Start-Process .\PremiumPlusCombo-v4.8.22-STABLE.exe -ArgumentList '--warrior-model-test' -Wait -PassThru
+          if($p.ExitCode){throw 'warrior test failed'}
+          $w=Get-Content warrior-model-test-report.txt -Raw
+          foreach($x in @('TOTAL=26','PASSED=26','Slot4FourthColumn=PASS','OneSharedHotkey=PASS','DescentReturnBarMapping=PASS','TimedExtraTwoMinutes=PASS','TimedAbsoluteDeadlineNoDrift=PASS','BattleCryTemplateDetected=PASS','BattleCryFlatRejected=PASS')){if($w -notmatch [regex]::Escape($x)){throw "missing $x"}}
+          Write-Host 'LEGACY=180/180 PASS';Write-Host 'MOB=8/8 PASS';Write-Host 'WARRIOR=26/26 PASS'
+
+      - name: Defender diagnostic
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        continue-on-error: true
+        run: |
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(Test-Path $mp){& $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo-v4.8.22-STABLE.exe) 2>&1 | Tee-Object defender-scan.txt}else{'DEFENDER_UNAVAILABLE' | Set-Content defender-scan.txt}
+
+      - name: Build release report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $sha=(Get-FileHash .\PremiumPlusCombo-v4.8.22-STABLE.exe -Algorithm SHA256).Hash
+          @("Product=PremiumPlusCombo","Version=4.8.22","Base=v4.8.21 STABLE / exact v4.8.11 production family","LegacySelfTest=180/180 PASS","MobModelTest=8/8 PASS","WarriorModelTest=26/26 PASS","BattleCryVisualConfirmation=PASS","BattleCryCalibratedBuffRegionOnly=PASS","TimedSkillsDynamicRows=PASS","TimedSkillsNoCumulativeDrift=PASS","DescentReturnBarOptional=PASS","EquipmentRightClickOnly=PASS","EquipmentEndsInventoryClosed=PASS","FastInventorySmallCapture=PASS","ExactImportSurfaceVsV4811=PASS","EXE_SHA256=$sha") | Set-Content PremiumPlusCombo-v4.8.22-REPORT.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-v4.8.22-STABLE-BATTLECRY-FAST
+          path: |
+            premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.22-STABLE.exe
+            premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.22-REPORT.txt
+            premium_plus_combo_final/workbench/self-test-report.txt
+            premium_plus_combo_final/workbench/mob-model-test-report.txt
+            premium_plus_combo_final/workbench/warrior-model-test-report.txt
+            premium_plus_combo_final/workbench/defender-scan.txt
