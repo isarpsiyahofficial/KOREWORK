@@ -1,0 +1,41 @@
+name: TEMP export v4820 source
+on:
+  push:
+    branches: [ premiumplus-v4821-warrior-descent-echo ]
+    paths: [ '.github/workflows/tmp-export-v4820-source.yml' ]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate current v4820 source
+        shell: pwsh
+        run: |
+          $base='premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
+          $out='premium_plus_combo_final/workbench/premiumplus_v4820_generated.cpp'
+          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base $out
+          if($LASTEXITCODE){exit 1}
+          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py $out
+          if($LASTEXITCODE){exit 1}
+          python premium_plus_combo_final/workbench/post_mob_r_chase.py $out
+          if($LASTEXITCODE){exit 1}
+          python premium_plus_combo_final/workbench/post_ui_compact_tabs.py $out
+          if($LASTEXITCODE){exit 1}
+          python premium_plus_combo_final/workbench/post_warrior_rightclick.py $out
+          if($LASTEXITCODE){exit 1}
+          python premium_plus_combo_final/workbench/post_warrior_defender_clean.py $out
+          if($LASTEXITCODE){exit 1}
+          @'
+          import pathlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4820_generated.cpp')
+          s=p.read_text(encoding='utf-8').replace('Premium Plus Combo | v4.8.17','Premium Plus Combo | v4.8.19')
+          p.write_text(s,encoding='utf-8',newline='\n')
+          '@ | python -
+          python premium_plus_combo_final/workbench/post_warrior_toggle_fast.py $out
+          if($LASTEXITCODE){exit 1}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v4820-generated-source
+          path: premium_plus_combo_final/workbench/premiumplus_v4820_generated.cpp
