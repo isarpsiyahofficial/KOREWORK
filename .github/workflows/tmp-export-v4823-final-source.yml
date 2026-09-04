@@ -1,0 +1,55 @@
+name: TEMP export exact v4.8.23 final source
+on:
+  push:
+    branches: [tmp-v4824-export-final-source]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate exact v4.8.23 source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
+          $out='premium_plus_combo_final/workbench/premiumplus_v4823_final.cpp'
+          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base $out
+          if($LASTEXITCODE){throw 'apply_mob_dynamic'}
+          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py $out
+          if($LASTEXITCODE){throw 'post_mob_dynamic_fix'}
+          python premium_plus_combo_final/workbench/post_mob_r_chase.py $out
+          if($LASTEXITCODE){throw 'post_mob_r_chase'}
+          python premium_plus_combo_final/workbench/post_ui_compact_tabs.py $out
+          if($LASTEXITCODE){throw 'post_ui_compact_tabs'}
+          python premium_plus_combo_final/workbench/post_warrior_rightclick.py $out
+          if($LASTEXITCODE){throw 'post_warrior_rightclick'}
+          python premium_plus_combo_final/workbench/post_warrior_defender_clean.py $out
+          if($LASTEXITCODE){throw 'post_warrior_defender_clean'}
+          @'
+          import pathlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4823_final.cpp')
+          s=p.read_text(encoding='utf-8').replace('Premium Plus Combo | v4.8.17','Premium Plus Combo | v4.8.19')
+          p.write_text(s,encoding='utf-8',newline='\n')
+          '@ | python -
+          python premium_plus_combo_final/workbench/post_warrior_toggle_fast.py $out
+          if($LASTEXITCODE){throw 'post_warrior_toggle_fast'}
+          python premium_plus_combo_final/workbench/post_warrior_descent_echo.py $out
+          if($LASTEXITCODE){throw 'post_warrior_descent_echo'}
+          python premium_plus_combo_final/workbench/post_warrior_v4822.py $out
+          if($LASTEXITCODE){throw 'post_warrior_v4822'}
+          @'
+          import pathlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4823_final.cpp')
+          s=p.read_text(encoding='utf-8')
+          old='return total==25&&pass==25;'
+          if old in s:s=s.replace(old,'return total==26&&pass==26;',1)
+          p.write_text(s,encoding='utf-8',newline='\n')
+          '@ | python -
+          python premium_plus_combo_final/workbench/post_warrior_v4823_livefix.py $out
+          if($LASTEXITCODE){throw 'post_warrior_v4823_livefix'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v4823-exact-final-source
+          path: premium_plus_combo_final/workbench/premiumplus_v4823_final.cpp
