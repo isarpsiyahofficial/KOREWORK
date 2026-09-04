@@ -40,11 +40,17 @@ jobs:
           $ref='premium_plus_combo_final/workbench/premiumplus_v4821_reference.cpp'
           $out='premium_plus_combo_final/workbench/premiumplus_v4822.cpp'
           python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base $ref
+          if($LASTEXITCODE){throw 'apply_mob_dynamic failed'}
           python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py $ref
+          if($LASTEXITCODE){throw 'post_mob_dynamic_fix failed'}
           python premium_plus_combo_final/workbench/post_mob_r_chase.py $ref
+          if($LASTEXITCODE){throw 'post_mob_r_chase failed'}
           python premium_plus_combo_final/workbench/post_ui_compact_tabs.py $ref
+          if($LASTEXITCODE){throw 'post_ui_compact_tabs failed'}
           python premium_plus_combo_final/workbench/post_warrior_rightclick.py $ref
+          if($LASTEXITCODE){throw 'post_warrior_rightclick failed'}
           python premium_plus_combo_final/workbench/post_warrior_defender_clean.py $ref
+          if($LASTEXITCODE){throw 'post_warrior_defender_clean failed'}
           @'
           import pathlib
           p=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4821_reference.cpp')
@@ -52,9 +58,12 @@ jobs:
           p.write_text(s,encoding='utf-8',newline='\n')
           '@ | python -
           python premium_plus_combo_final/workbench/post_warrior_toggle_fast.py $ref
+          if($LASTEXITCODE){throw 'post_warrior_toggle_fast failed'}
           python premium_plus_combo_final/workbench/post_warrior_descent_echo.py $ref
+          if($LASTEXITCODE){throw 'post_warrior_descent_echo failed'}
           Copy-Item $ref $out
           python premium_plus_combo_final/workbench/post_warrior_v4822.py $out
+          if($LASTEXITCODE){throw 'post_warrior_v4822 failed'}
           @'
           import pathlib
           p=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4822.cpp')
@@ -62,8 +71,12 @@ jobs:
           old='return total==25&&pass==25;'
           assert old in s
           s=s.replace(old,'return total==26&&pass==26;',1)
+          old2='int innerW=std::max(1,inner.right-inner.left),innerH=std::max(1,inner.bottom-inner.top);'
+          assert old2 in s
+          s=s.replace(old2,'int innerW=std::max(1,(int)(inner.right-inner.left)),innerH=std::max(1,(int)(inner.bottom-inner.top));',1)
           p.write_text(s,encoding='utf-8',newline='\n')
           print('MODEL_COUNT_FIX=26')
+          print('RECT_TYPE_FIX=PASS')
           '@ | python -
 
       - name: Preserve existing working modules
