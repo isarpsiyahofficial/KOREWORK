@@ -19,7 +19,14 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
-      - name: Generate and dump current v4.8.24 MOB/UI sections
+      - name: Generate current v4.8.24 source and MOB/UI dump
         shell: pwsh
         run: |
           python premium_plus_combo_final/workbench/dump_v4824_mob_sections.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v4824-generated-source-diagnostics
+          if-no-files-found: error
+          path: |
+            premium_plus_combo_final/workbench/premiumplus_v4824_final.cpp
+            premium_plus_combo_final/workbench/v4824-mob-dump.txt
