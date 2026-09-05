@@ -1,4 +1,4 @@
-import pathlib,struct,hashlib,sys
+import pathlib,struct,hashlib
 WB=pathlib.Path(__file__).resolve().parent
 control=WB/'PremiumPlusCombo-v4.8.11-CONTROL.exe'
 release=WB/'PremiumPlusCombo-v4.8.24-FINAL.exe'
@@ -21,7 +21,8 @@ def imp(path):
         while True:
             v=struct.unpack_from('<Q',b,to+j*8)[0]
             if not v:break
-            out.add(dll+'!'+('#'+str(v&0xffff) if v&(1<<63) else cs(b,rva(b,co,op,v)+2));j+=1
+            name='#'+str(v&0xffff) if v&(1<<63) else cs(b,rva(b,co,op,v)+2)
+            out.add(dll+'!'+name);j+=1
         d+=20
     return out
 cb,cc,co,cn,cd=pe(control);rb,rc,ro,rn,rd=pe(release)
