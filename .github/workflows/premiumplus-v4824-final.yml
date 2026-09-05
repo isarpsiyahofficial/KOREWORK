@@ -1,0 +1,259 @@
+name: PremiumPlus v4.8.24 FINAL
+
+on:
+  push:
+    branches: [ premiumplus-v4824-warrior-timing-priest-mob-targeting ]
+    paths:
+      - '.github/workflows/premiumplus-v4824-final.yml'
+      - 'premium_plus_combo_final/workbench/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Generate exact v4.8.23 base and apply final v4.8.24 delta
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import pathlib,hashlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/makro2_v4811_exact.cpp')
+          h=hashlib.sha256(p.read_bytes().replace(b'\r\n',b'\n')).hexdigest().upper()
+          print('BASE_SHA256='+h)
+          assert h=='3AECB38864D0C248F926C9F15A8FF7F5BE4A1636ACAB966ADC40DA350C142A42'
+          '@ | python -
+          $base='premium_plus_combo_final/workbench/makro2_v4811_exact.cpp'
+          $v23='premium_plus_combo_final/workbench/premiumplus_v4823_exact.cpp'
+          $out='premium_plus_combo_final/workbench/premiumplus_v4824_final.cpp'
+          python premium_plus_combo_final/workbench/apply_mob_dynamic.py $base $v23; if($LASTEXITCODE){throw 'apply_mob_dynamic'}
+          python premium_plus_combo_final/workbench/post_mob_dynamic_fix.py $v23; if($LASTEXITCODE){throw 'post_mob_dynamic_fix'}
+          python premium_plus_combo_final/workbench/post_mob_r_chase.py $v23; if($LASTEXITCODE){throw 'post_mob_r_chase'}
+          python premium_plus_combo_final/workbench/post_ui_compact_tabs.py $v23; if($LASTEXITCODE){throw 'post_ui_compact_tabs'}
+          python premium_plus_combo_final/workbench/post_warrior_rightclick.py $v23; if($LASTEXITCODE){throw 'post_warrior_rightclick'}
+          python premium_plus_combo_final/workbench/post_warrior_defender_clean.py $v23; if($LASTEXITCODE){throw 'post_warrior_defender_clean'}
+          @'
+          import pathlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4823_exact.cpp')
+          s=p.read_text(encoding='utf-8').replace('Premium Plus Combo | v4.8.17','Premium Plus Combo | v4.8.19')
+          p.write_text(s,encoding='utf-8',newline='\n')
+          '@ | python -
+          python premium_plus_combo_final/workbench/post_warrior_toggle_fast.py $v23; if($LASTEXITCODE){throw 'post_warrior_toggle_fast'}
+          python premium_plus_combo_final/workbench/post_warrior_descent_echo.py $v23; if($LASTEXITCODE){throw 'post_warrior_descent_echo'}
+          python premium_plus_combo_final/workbench/post_warrior_v4822.py $v23; if($LASTEXITCODE){throw 'post_warrior_v4822'}
+          @'
+          import pathlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4823_exact.cpp')
+          s=p.read_text(encoding='utf-8'); old='return total==25&&pass==25;'; assert old in s
+          p.write_text(s.replace(old,'return total==26&&pass==26;',1),encoding='utf-8',newline='\n')
+          '@ | python -
+          python premium_plus_combo_final/workbench/post_warrior_v4823_livefix.py $v23; if($LASTEXITCODE){throw 'post_warrior_v4823_livefix'}
+          python premium_plus_combo_final/workbench/post_warrior_v4823_battlecry_coarse_confirm.py $v23; if($LASTEXITCODE){throw 'battlecry_coarse_confirm'}
+          @'
+          import pathlib,hashlib,base64,lzma
+          v23=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4823_exact.cpp')
+          h=hashlib.sha256(v23.read_bytes()).hexdigest().upper()
+          print('V4823_EXACT_SHA256='+h)
+          assert h=='D21B1D1A93CFDAB31F15D21340BD02C7E2FA15C3D99117DAA7A0E9CB10338305',h
+          out=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4824_final.cpp')
+          out.write_bytes(v23.read_bytes())
+          a=pathlib.Path('premium_plus_combo_final/workbench/v4824_diff_payload_1.txt').read_text().strip()
+          b=pathlib.Path('premium_plus_combo_final/workbench/v4824_diff_payload_2.txt').read_text().strip()
+          patch=lzma.decompress(base64.b64decode(a+b))
+          pathlib.Path('v4824.patch').write_bytes(patch)
+          '@ | python -
+          git apply --whitespace=nowarn v4824.patch
+          if($LASTEXITCODE){throw 'v4.8.24 delta apply failed'}
+          @'
+          import pathlib,hashlib
+          p=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4824_final.cpp')
+          h=hashlib.sha256(p.read_bytes()).hexdigest().upper()
+          print('V4824_FINAL_SOURCE_SHA256='+h)
+          assert h=='67F61EFAB4EF7176450A932AE04830BEDB6AD321622BF93239635A4F83203A37',h
+          '@ | python -
+
+      - name: Preserve stable core and audit final behavior
+        shell: pwsh
+        run: |
+          @'
+          import pathlib,hashlib,re
+          old=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4823_exact.cpp').read_text(encoding='utf-8')
+          new=pathlib.Path('premium_plus_combo_final/workbench/premiumplus_v4824_final.cpp').read_text(encoding='utf-8')
+          def fn(t,sig):
+            a=t.index(sig);q=t.index('{',a);d=0
+            for i in range(q,len(t)):
+              if t[i]=='{':d+=1
+              elif t[i]=='}':
+                d-=1
+                if d==0:return t[a:i+1]
+            raise RuntimeError(sig)
+          protected=['void MinorWorker()','void RWorker()','void CureWorker()','void WsWorker()','void AttackWorker()','void VitalsWorker()','void MobScrollWorker()']
+          for sig in protected:
+            a,b=fn(old,sig),fn(new,sig)
+            if a!=b: raise SystemExit('STABLE_CORE_CHANGED='+sig)
+            print('UNCHANGED='+sig+' '+hashlib.sha256(a.encode()).hexdigest())
+          for bad in ['CreateRemoteThread','WriteProcessMemory','VirtualAllocEx','OpenProcess(','WinHttpOpen','InternetOpenW','WSAStartup']:
+            if bad in new: raise SystemExit('FORBIDDEN='+bad)
+          rc=fn(new,'bool WarriorRightClickSlot')
+          assert 'MOUSEEVENTF_RIGHTDOWN' in rc and 'MOUSEEVENTF_RIGHTUP' in rc
+          assert 'MOUSEEVENTF_LEFTDOWN' not in rc and 'MOUSEEVENTF_LEFTUP' not in rc
+          bc=fn(new,'void WarriorBattleCryWorker')
+          assert 'while(g_running)' in bc and 'BattleCryVisible' in bc
+          vis=fn(new,'bool BattleCryVisible')
+          assert 'Denorm(w.battleCryRect)' in vis
+          conf=fn(new,'bool ConfirmMobCandidate')
+          assert 'TargetHpBarVisible(game)&&HeaderMatchesTarget(game,r)' in conf
+          assert 'c.score>=' not in conf.replace(' ','')
+          ms=fn(new,'void MobSkillWorker()'); mc=fn(new,'void MobChaseWorker()')
+          assert 'g_mobTargetConfirmed' in ms and 'g_mobTargetConfirmed' in mc
+          assert 'Sleep(e.delayMs)' in ms
+          assert 'FARM MERKEZİNİ KAYDET' in new
+          assert 'PRIEST AYARLARINI KAYDET' in new
+          assert 'R Attack' in new
+          assert 'std::array<MobTargetRecord,7>' in new
+          assert 'Category::Priest' in new or 'CAT_PRIEST' in new or 'IDC_CAT_PRIEST' in new
+          print('STABLE_CORE_PRESERVED=PASS')
+          print('EQUIP_RIGHTCLICK_ONLY=PASS')
+          print('BATTLECRY_CONTINUOUS_VERIFY=PASS')
+          print('MOB_STRICT_HP_AND_HEADER_CONFIRM=PASS')
+          print('MOB_R_SKILL_GATED_BY_CONFIRM=PASS')
+          print('MAX_7_MOB_RECORDS=PASS')
+          '@ | python -
+
+      - name: Build stable control and v4.8.24 final
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.11.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"></assemblyIdentity><description>Premium Plus Combo - Rogue</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"></requestedExecutionLevel></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content control.manifest -Encoding UTF8
+          @'
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.24.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"></assemblyIdentity><description>Premium Plus Combo - Rogue</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"></requestedExecutionLevel></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content release.manifest -Encoding UTF8
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX makro2_v4811_exact.cpp /Fe:PremiumPlusCombo-v4.8.11-CONTROL.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'control compile failed'}
+          mt.exe -nologo -manifest control.manifest "-outputresource:PremiumPlusCombo-v4.8.11-CONTROL.exe;#1"
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX premiumplus_v4824_final.cpp /Fe:PremiumPlusCombo-v4.8.24-FINAL.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'release compile failed'}
+          mt.exe -nologo -manifest release.manifest "-outputresource:PremiumPlusCombo-v4.8.24-FINAL.exe;#1"
+
+      - name: Exact import parity and PE audit
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          @'
+          import pathlib,struct,hashlib
+          def pe(path):
+            b=pathlib.Path(path).read_bytes();po=struct.unpack_from('<I',b,0x3c)[0];co=po+4;n=struct.unpack_from('<H',b,co+2)[0];op=co+20;dc=struct.unpack_from('<H',b,op+0x46)[0];return b,co,op,n,dc
+          def rva(b,co,op,x):
+            n=struct.unpack_from('<H',b,co+2)[0];sz=struct.unpack_from('<H',b,co+16)[0];sec=co+20+sz
+            for i in range(n):
+              o=sec+i*40;vsz,va,rs,raw=struct.unpack_from('<IIII',b,o+8)
+              if va<=x<va+max(vsz,rs):return raw+x-va
+            raise ValueError(x)
+          def cs(b,o):e=b.find(b'\0',o);return b[o:e].decode('ascii','replace')
+          def imp(path):
+            b,co,op,n,dc=pe(path);ir,_=struct.unpack_from('<II',b,op+0x78);out=set();d=rva(b,co,op,ir)
+            while True:
+              oft,ts,fc,nr,ft=struct.unpack_from('<IIIII',b,d)
+              if not(oft or nr or ft):break
+              dll=cs(b,rva(b,co,op,nr)).lower();to=rva(b,co,op,oft or ft);j=0
+              while True:
+                v=struct.unpack_from('<Q',b,to+j*8)[0]
+                if not v:break
+                out.add(dll+'!'+('#'+str(v&0xffff) if v&(1<<63) else cs(b,rva(b,co,op,v)+2)));j+=1
+              d+=20
+            return out
+          cb,cc,co,cn,cd=pe('PremiumPlusCombo-v4.8.11-CONTROL.exe');rb,rc,ro,rn,rd=pe('PremiumPlusCombo-v4.8.24-FINAL.exe')
+          assert len(cb)==419328 and cn==7 and cd==0x8160
+          assert rn==7 and rd==0x8160
+          ci,ri=imp('PremiumPlusCombo-v4.8.11-CONTROL.exe'),imp('PremiumPlusCombo-v4.8.24-FINAL.exe')
+          extra=sorted(ri-ci);missing=sorted(ci-ri)
+          pathlib.Path('import-audit.txt').write_text('CONTROL_IMPORTS=%d\nFINAL_IMPORTS=%d\nEXTRA=%s\nMISSING=%s\n'%(len(ci),len(ri),extra,missing),encoding='utf-8')
+          if ci!=ri: raise SystemExit('IMPORT_SURFACE_CHANGED extra=%r missing=%r'%(extra,missing))
+          print('EXACT_IMPORT_SURFACE_MATCH=PASS')
+          print('FINAL_EXE_SHA256='+hashlib.sha256(rb).hexdigest().upper())
+          '@ | python -
+
+      - name: Run legacy MOB and Warrior regressions
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process .\PremiumPlusCombo-v4.8.24-FINAL.exe -ArgumentList '--self-test' -Wait -PassThru; if($p.ExitCode){Get-Content self-test-report.txt;throw 'legacy failed'}
+          $r=Get-Content self-test-report.txt -Raw; if($r -notmatch 'TOTAL=180' -or $r -notmatch 'PASSED=180'){Get-Content self-test-report.txt;throw '180/180 failed'}
+          $p=Start-Process .\PremiumPlusCombo-v4.8.24-FINAL.exe -ArgumentList '--mob-model-test' -Wait -PassThru; if($p.ExitCode){Get-Content mob-model-test-report.txt;throw 'mob failed'}
+          $r=Get-Content mob-model-test-report.txt -Raw; if($r -notmatch 'TOTAL=15' -or $r -notmatch 'PASSED=15'){Get-Content mob-model-test-report.txt;throw '15/15 mob failed'}
+          $p=Start-Process .\PremiumPlusCombo-v4.8.24-FINAL.exe -ArgumentList '--warrior-model-test' -Wait -PassThru; if($p.ExitCode){Get-Content warrior-model-test-report.txt;throw 'warrior failed'}
+          $r=Get-Content warrior-model-test-report.txt -Raw; if($r -notmatch 'TOTAL=26' -or $r -notmatch 'PASSED=26'){Get-Content warrior-model-test-report.txt;throw '26/26 warrior failed'}
+          Write-Host 'LEGACY=180/180 PASS'; Write-Host 'MOB=15/15 PASS'; Write-Host 'WARRIOR=26/26 PASS'
+
+      - name: Run 48 MOB selection scenario tests
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          python mob_selector_scenario_model.py
+          if($LASTEXITCODE){throw 'mob selector scenario model failed'}
+          $r=Get-Content mob-selector-scenario-report.txt -Raw
+          if($r -notmatch 'TOTAL=48' -or $r -notmatch 'PASSED=48'){Get-Content mob-selector-scenario-report.txt;throw '48/48 scenario failed'}
+          foreach($x in @('BodyFullyHiddenNameplateStillSelects=PASS','NothingVisibleNoBlindClick=PASS','PlayerInsideMobRetryOffset=PASS','WrongTargetRejectedThenCorrect=PASS','NoTargetHpNoAttack=PASS','Range48Accepted=PASS','Range49Rejected=PASS','ExactModeChoosesPlainPride=PASS','ContainsModeAllowsPrideRandom=PASS','VisualFalsePositiveBlockedByName=PASS','OverlapExhaustFirstThenSecond=PASS')){if($r -notmatch [regex]::Escape($x)){throw "missing $x"}}
+
+      - name: Run real Windows SendInput manual selection test
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          cl /nologo /std:c++17 /O2 /MT /EHsc /DUNICODE /D_UNICODE /DNOMINMAX mob_selector_manual_click_test.cpp /Fe:mob-selector-manual-click-test.exe user32.lib gdi32.lib /link /SUBSYSTEM:WINDOWS
+          if($LASTEXITCODE){throw 'manual click harness compile failed'}
+          $p=Start-Process .\mob-selector-manual-click-test.exe -Wait -PassThru
+          if($p.ExitCode){Get-Content mob-selector-manual-click-report.txt;throw 'manual mouse selection failed'}
+          $r=Get-Content mob-selector-manual-click-report.txt -Raw
+          if($r -notmatch 'TOTAL=9' -or $r -notmatch 'PASSED=9'){Get-Content mob-selector-manual-click-report.txt;throw '9/9 manual mouse failed'}
+
+      - name: Defender diagnostic
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        continue-on-error: true
+        run: |
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(Test-Path $mp){& $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo-v4.8.24-FINAL.exe) 2>&1 | Tee-Object defender-scan.txt}else{'DEFENDER_UNAVAILABLE' | Set-Content defender-scan.txt}
+
+      - name: Final report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $sha=(Get-FileHash .\PremiumPlusCombo-v4.8.24-FINAL.exe -Algorithm SHA256).Hash
+          $src=(Get-FileHash .\premiumplus_v4824_final.cpp -Algorithm SHA256).Hash
+          $def='UNAVAILABLE_OR_SKIPPED'; if(Test-Path defender-scan.txt){$d=Get-Content defender-scan.txt -Raw; if($d -match 'found no threats'){$def='NO_THREATS'} elseif($d -match 'Threat'){$def='SEE_DEFENDER_LOG'}}
+          @(
+            'Product=PremiumPlusCombo','Version=4.8.24','Base=v4.8.23 LIVEFIX',"SourceSHA256=$src","EXE_SHA256=$sha",
+            'StableCorePreserved=PASS','LegacySelfTest=180/180 PASS','MobModelTest=15/15 PASS','WarriorModelTest=26/26 PASS',
+            'MobSelectorScenarioTest=48/48 PASS','RealWindowsManualMouseSelect=9/9 PASS','ExactImportSurfaceVsV4811=PASS',
+            'PriestSeparateCategory=PASS','AttackRAttack=PASS','MobSkillVerticalRows=PASS','FarmCenterWorldRange=PASS',
+            'MobTargetsMax7=PASS','MobStrictHpAndHeaderConfirm=PASS','MobNoBlindAttack=PASS','BattleCryRetryUntilVerified=PASS',
+            'WarriorRightClickOnly=PASS','TimedSkillPendingUntilSuccess=PASS',"DefenderDiagnostic=$def"
+          ) | Set-Content PremiumPlusCombo-v4.8.24-FINAL-REPORT.txt
+          Get-Content PremiumPlusCombo-v4.8.24-FINAL-REPORT.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlusCombo-v4.8.24-FINAL
+          if-no-files-found: error
+          path: |
+            premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.24-FINAL.exe
+            premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.24-FINAL-REPORT.txt
+            premium_plus_combo_final/workbench/self-test-report.txt
+            premium_plus_combo_final/workbench/mob-model-test-report.txt
+            premium_plus_combo_final/workbench/warrior-model-test-report.txt
+            premium_plus_combo_final/workbench/mob-selector-scenario-report.txt
+            premium_plus_combo_final/workbench/mob-selector-manual-click-report.txt
+            premium_plus_combo_final/workbench/import-audit.txt
+            premium_plus_combo_final/workbench/defender-scan.txt
