@@ -1,0 +1,25 @@
+name: PremiumPlus v4.8.25 diagnostics
+
+on:
+  push:
+    branches: [ tmp/premiumplus-v4825-diagnostics ]
+    paths:
+      - '.github/workflows/premiumplus-v4825-diagnostics.yml'
+      - 'premium_plus_combo_final/workbench/dump_v4824_mob_sections.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Generate and dump current v4.8.24 MOB/UI sections
+        shell: pwsh
+        run: |
+          python premium_plus_combo_final/workbench/dump_v4824_mob_sections.py
