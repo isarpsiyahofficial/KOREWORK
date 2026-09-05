@@ -1,0 +1,12 @@
+PremiumPlusCombo v4.8.24 FINAL
+Validated workflow run: 33964657704
+Validated artifact: 9969048736
+Source SHA256: F709BFE06C77F3BAE5AED78F20C99ECDE70B5B4995C351C6B2D1AF7435F082C6
+EXE SHA256: 243DB4E95A6DB725A3A49D73DB5DAE99E4DAACC36945F6F032489B16E0048510
+Legacy: 180/180 PASS
+MOB: 16/16 PASS
+Warrior: 26/26 PASS
+MOB selector scenarios: 48/48 PASS
+Real Windows mouse selection: 9/9 PASS
+Exact import surface vs v4.8.11: PASS
+Defender runner diagnostic: SKIPPED by runner (not claimed clean)
