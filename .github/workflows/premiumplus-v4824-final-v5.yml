@@ -1,0 +1,127 @@
+name: PremiumPlus v4.8.24 FINAL v5
+
+on:
+  push:
+    branches: [ premiumplus-v4824-warrior-timing-priest-mob-targeting ]
+    paths:
+      - '.github/workflows/premiumplus-v4824-final-v5.yml'
+      - 'premium_plus_combo_final/workbench/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  final:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Generate and audit final source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python premium_plus_combo_final/workbench/build_v4824_final_source.py
+          if($LASTEXITCODE){throw 'source build failed'}
+          python premium_plus_combo_final/workbench/audit_v4824_static.py
+          if($LASTEXITCODE){throw 'static audit failed'}
+
+      - name: Build control and release
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.11.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"></assemblyIdentity><description>Premium Plus Combo - Rogue</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"></requestedExecutionLevel></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content control.manifest -Encoding UTF8
+          @'
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.24.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"></assemblyIdentity><description>Premium Plus Combo - Rogue</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"></requestedExecutionLevel></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content release.manifest -Encoding UTF8
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX makro2_v4811_exact.cpp /Fe:PremiumPlusCombo-v4.8.11-CONTROL.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'control compile failed'}
+          mt.exe -nologo -manifest control.manifest "-outputresource:PremiumPlusCombo-v4.8.11-CONTROL.exe;#1"
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX premiumplus_v4824_final.cpp /Fe:PremiumPlusCombo-v4.8.24-FINAL.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'release compile failed'}
+          mt.exe -nologo -manifest release.manifest "-outputresource:PremiumPlusCombo-v4.8.24-FINAL.exe;#1"
+          python audit_v4824_pe.py
+          if($LASTEXITCODE){throw 'PE/import audit failed'}
+
+      - name: Run application regressions
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process .\PremiumPlusCombo-v4.8.24-FINAL.exe -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode){Get-Content self-test-report.txt;throw 'legacy failed'}
+          $r=Get-Content self-test-report.txt -Raw
+          if($r -notmatch 'TOTAL=180' -or $r -notmatch 'PASSED=180'){throw '180/180 failed'}
+          $p=Start-Process .\PremiumPlusCombo-v4.8.24-FINAL.exe -ArgumentList '--mob-model-test' -Wait -PassThru
+          if($p.ExitCode){Get-Content mob-model-test-report.txt;throw 'mob failed'}
+          $r=Get-Content mob-model-test-report.txt -Raw
+          if($r -notmatch 'TOTAL=16' -or $r -notmatch 'PASSED=16'){throw '16/16 mob failed'}
+          $p=Start-Process .\PremiumPlusCombo-v4.8.24-FINAL.exe -ArgumentList '--warrior-model-test' -Wait -PassThru
+          if($p.ExitCode){Get-Content warrior-model-test-report.txt;throw 'warrior failed'}
+          $r=Get-Content warrior-model-test-report.txt -Raw
+          if($r -notmatch 'TOTAL=26' -or $r -notmatch 'PASSED=26'){throw '26/26 warrior failed'}
+          Write-Host 'LEGACY=180/180 PASS';Write-Host 'MOB=16/16 PASS';Write-Host 'WARRIOR=26/26 PASS'
+
+      - name: Run 48 selector scenarios
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python premium_plus_combo_final/workbench/mob_selector_scenario_model.py
+          $r=Get-Content mob-selector-scenario-report.txt -Raw
+          if($r -notmatch 'TOTAL=48' -or $r -notmatch 'PASSED=48'){throw '48/48 selector failed'}
+          Copy-Item mob-selector-scenario-report.txt premium_plus_combo_final/workbench/mob-selector-scenario-report.txt -Force
+
+      - name: Run 9 real Windows mouse scenarios synchronously
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          cl /nologo /std:c++17 /O2 /MT /EHsc /DUNICODE /D_UNICODE mob_selector_manual_click_test.cpp /Fe:mob-selector-manual-click-test.exe user32.lib gdi32.lib /link /SUBSYSTEM:WINDOWS
+          if($LASTEXITCODE){throw 'manual click compile failed'}
+          $p=Start-Process .\mob-selector-manual-click-test.exe -Wait -PassThru
+          if($p.ExitCode){if(Test-Path .\mob-selector-manual-click-report.txt){Get-Content .\mob-selector-manual-click-report.txt};throw 'real mouse executable failed'}
+          if(-not (Test-Path .\mob-selector-manual-click-report.txt)){throw 'real mouse report missing after waited process'}
+          $m=Get-Content .\mob-selector-manual-click-report.txt -Raw
+          Get-Content .\mob-selector-manual-click-report.txt
+          if($m -notmatch 'TOTAL=9' -or $m -notmatch 'PASSED=9'){throw '9/9 real mouse failed'}
+
+      - name: Defender diagnostic
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        continue-on-error: true
+        run: |
+          $mp="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(Test-Path $mp){& $mp -SignatureUpdate 2>&1 | Out-Null;& $mp -Scan -ScanType 3 -File (Resolve-Path .\PremiumPlusCombo-v4.8.24-FINAL.exe) 2>&1 | Tee-Object defender-scan.txt}else{'DEFENDER_UNAVAILABLE'|Set-Content defender-scan.txt}
+
+      - name: Write final report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $sha=(Get-FileHash .\PremiumPlusCombo-v4.8.24-FINAL.exe -Algorithm SHA256).Hash
+          $src=(Get-FileHash .\premiumplus_v4824_final.cpp -Algorithm SHA256).Hash
+          $def='UNAVAILABLE_OR_SKIPPED'
+          if(Test-Path defender-scan.txt){$d=Get-Content defender-scan.txt -Raw;if($d -match 'found no threats'){$def='NO_THREATS'}elseif($d -match 'Threat'){$def='SEE_DEFENDER_LOG'}}
+          @("Product=PremiumPlusCombo","Version=4.8.24","Base=v4.8.23 LIVEFIX","SourceSHA256=$src","EXE_SHA256=$sha",'StableCorePreserved=PASS','LegacySelfTest=180/180 PASS','MobModelTest=16/16 PASS','WarriorModelTest=26/26 PASS','MobSelectorScenario=48/48 PASS','RealWindowsMouseSelect=9/9 PASS','ExactImportSurfaceVsV4811=PASS','PriestSeparateCategory=PASS','AttackRAttack=PASS','MobSkillVerticalRows=PASS','FarmCenterRange=PASS','MobTargetsMax7=PASS','StrictTargetHpAndHeader=PASS','BattleCryRetryUntilVerified=PASS','WarriorRightClickOnly=PASS',"DefenderDiagnostic=$def") | Set-Content PremiumPlusCombo-v4.8.24-FINAL-REPORT.txt
+          Get-Content PremiumPlusCombo-v4.8.24-FINAL-REPORT.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlus-v4.8.24-FINAL
+          if-no-files-found: error
+          path: |
+            premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.24-FINAL.exe
+            premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.24-FINAL-REPORT.txt
+            premium_plus_combo_final/workbench/self-test-report.txt
+            premium_plus_combo_final/workbench/mob-model-test-report.txt
+            premium_plus_combo_final/workbench/warrior-model-test-report.txt
+            premium_plus_combo_final/workbench/import-audit.txt
+            premium_plus_combo_final/workbench/defender-scan.txt
+            premium_plus_combo_final/workbench/v4824-final-source-sha.txt
+            premium_plus_combo_final/workbench/mob-selector-scenario-report.txt
+            premium_plus_combo_final/workbench/mob-selector-manual-click-report.txt
