@@ -141,12 +141,18 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           python premium_plus_combo_final/workbench/mob_selector_scenario_model.py
-          $r=Get-Content mob-selector-scenario-report.txt -Raw;if($r -notmatch 'TOTAL=48' -or $r -notmatch 'PASSED=48'){throw '48/48 selector failed'}
-          cl /nologo /std:c++17 /O2 /MT /EHsc /DUNICODE /D_UNICODE premium_plus_combo_final/workbench/mob_selector_manual_click_test.cpp /Fe:mob-selector-manual-click-test.exe user32.lib gdi32.lib /link /SUBSYSTEM:WINDOWS
-          if($LASTEXITCODE){throw 'manual click compile failed'}
+          $r=Get-Content mob-selector-scenario-report.txt -Raw
+          if($r -notmatch 'TOTAL=48' -or $r -notmatch 'PASSED=48'){throw '48/48 selector failed'}
+          Copy-Item mob-selector-scenario-report.txt premium_plus_combo_final/workbench/mob-selector-scenario-report.txt -Force
+          Push-Location premium_plus_combo_final/workbench
+          cl /nologo /std:c++17 /O2 /MT /EHsc /DUNICODE /D_UNICODE mob_selector_manual_click_test.cpp /Fe:mob-selector-manual-click-test.exe user32.lib gdi32.lib /link /SUBSYSTEM:WINDOWS
+          if($LASTEXITCODE){Pop-Location;throw 'manual click compile failed'}
           .\mob-selector-manual-click-test.exe
-          if($LASTEXITCODE){Get-Content mob-selector-manual-click-report.txt;throw 'real mouse failed'}
-          $m=Get-Content mob-selector-manual-click-report.txt -Raw;if($m -notmatch 'TOTAL=9' -or $m -notmatch 'PASSED=9'){throw '9/9 real mouse failed'}
+          if($LASTEXITCODE){if(Test-Path .\mob-selector-manual-click-report.txt){Get-Content .\mob-selector-manual-click-report.txt};Pop-Location;throw 'real mouse failed'}
+          if(-not (Test-Path .\mob-selector-manual-click-report.txt)){Pop-Location;throw 'manual click report missing'}
+          $m=Get-Content .\mob-selector-manual-click-report.txt -Raw
+          if($m -notmatch 'TOTAL=9' -or $m -notmatch 'PASSED=9'){Get-Content .\mob-selector-manual-click-report.txt;Pop-Location;throw '9/9 real mouse failed'}
+          Pop-Location
 
       - name: Defender diagnostic
         shell: pwsh
@@ -178,5 +184,5 @@ jobs:
             premium_plus_combo_final/workbench/import-audit.txt
             premium_plus_combo_final/workbench/defender-scan.txt
             premium_plus_combo_final/workbench/v4824-final-source-sha.txt
-            mob-selector-scenario-report.txt
-            mob-selector-manual-click-report.txt
+            premium_plus_combo_final/workbench/mob-selector-scenario-report.txt
+            premium_plus_combo_final/workbench/mob-selector-manual-click-report.txt
