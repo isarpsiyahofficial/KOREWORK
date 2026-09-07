@@ -1,0 +1,11 @@
+ManualClick_Pride=PASS
+ManualClick_Gluttony=PASS
+ManualClick_Wrath=PASS
+ManualClick_Sloth=PASS
+ManualClick_Lust=PASS
+ManualClick_Envy=PASS
+ManualClick_Greed=PASS
+WrongFirstThenCorrectRetry=PASS
+MissDoesNotSelectMob=PASS
+TOTAL=9
+PASSED=9
