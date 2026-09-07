@@ -11,6 +11,7 @@ assert h24=='F709BFE06C77F3BAE5AED78F20C99ECDE70B5B4995C351C6B2D1AF7435F082C6',h
 out.write_bytes(v24.read_bytes())
 subprocess.check_call([sys.executable,str(WB/'post_v4825_mob_ui_runtime_fix.py'),str(out)],cwd=ROOT)
 subprocess.check_call([sys.executable,str(WB/'post_v4825_responsive_layout.py'),str(out)],cwd=ROOT)
+subprocess.check_call([sys.executable,str(WB/'post_v4825_compile_order_fix.py'),str(out)],cwd=ROOT)
 h=hashlib.sha256(out.read_bytes()).hexdigest().upper()
 (WB/'v4825-final-source-sha.txt').write_text(h+'\n',encoding='utf-8')
 print('V4825_FINAL_SOURCE_SHA256='+h)
