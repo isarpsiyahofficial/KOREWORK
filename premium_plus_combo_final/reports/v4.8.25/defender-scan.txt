@@ -1,0 +1,3 @@
+Scan starting...
+Scan finished.
+Scanning D:\a\KOREWORK\KOREWORK\premium_plus_combo_final\workbench\PremiumPlusCombo-v4.8.25-FINAL.exe was skipped.
