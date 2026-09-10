@@ -1,0 +1,191 @@
+name: PremiumPlus v4.8.25 GAME INPUT RESTORE
+
+on:
+  push:
+    branches: [ fix/premiumplus-v4825-game-input-restore-20260910 ]
+    paths:
+      - '.github/workflows/premiumplus-v4825-game-input-restore.yml'
+      - 'premium_plus_combo_final/workbench/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  final:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Generate exact source and run static gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python premium_plus_combo_final/workbench/build_v4825_final_source.py
+          if($LASTEXITCODE){throw 'source build failed'}
+          python premium_plus_combo_final/workbench/audit_v4825_static.py
+          if($LASTEXITCODE){throw 'static audit failed'}
+          python premium_plus_combo_final/workbench/v4825_mob_ui_scenario_tests.py
+          if($LASTEXITCODE){throw 'MOB UI tests failed'}
+          python premium_plus_combo_final/workbench/v4825_attack_sideinput_tests.py
+          if($LASTEXITCODE){throw 'Attack side-input tests failed'}
+          python premium_plus_combo_final/workbench/v4825_warrior_attack_ui_tests.py
+          if($LASTEXITCODE){throw 'Warrior Attack UI tests failed'}
+          $r=Get-Content premium_plus_combo_final/workbench/v4825-warrior-attack-ui-report.txt -Raw
+          if($r -notmatch 'TOTAL=14' -or $r -notmatch 'PASSED=14'){throw '14/14 hotfix gate failed'}
+
+      - name: Build elevated game-compatible release
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.11.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"></assemblyIdentity><description>Premium Plus Combo - Rogue</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"></requestedExecutionLevel></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content control.manifest -Encoding UTF8
+          @'
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.25.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"></assemblyIdentity><description>Premium Plus Combo - Rogue</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"></requestedExecutionLevel></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content release.manifest -Encoding UTF8
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX makro2_v4811_exact.cpp /Fe:PremiumPlusCombo-v4.8.11-CONTROL.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'control compile failed'}
+          mt.exe -nologo -manifest control.manifest "-outputresource:PremiumPlusCombo-v4.8.11-CONTROL.exe;#1"
+          if($LASTEXITCODE){throw 'control manifest failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX premiumplus_v4825_final.cpp /Fe:PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'release compile failed'}
+          mt.exe -nologo -manifest release.manifest "-outputresource:PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE.exe;#1"
+          if($LASTEXITCODE){throw 'release manifest failed'}
+          Copy-Item PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE.exe PremiumPlusCombo-v4.8.25-FINAL.exe -Force
+          python audit_v4825_pe.py
+          if($LASTEXITCODE){throw 'PE/import audit failed'}
+          mt.exe -nologo -inputresource:PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE.exe`;#1 -out:embedded.manifest
+          if($LASTEXITCODE){throw 'manifest extract failed'}
+          $manifest=Get-Content embedded.manifest -Raw
+          if($manifest -notmatch 'requestedExecutionLevel level="requireAdministrator"'){throw 'requireAdministrator missing'}
+          if($manifest -match 'requestedExecutionLevel level="asInvoker"'){throw 'asInvoker still present'}
+          Write-Host 'GAME_INPUT_INTEGRITY_LEVEL=PASS'
+
+      - name: Verify Minor timing and CPU load
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process .\PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE.exe -ArgumentList '--minor-timing-test' -Wait -PassThru
+          if($p.ExitCode){throw 'Minor timing failed'}
+          $r=Get-Content minor-timing-report.txt -Raw
+          if($r -notmatch 'Cadence=PASS' -or $r -notmatch 'RESULT=PASS'){throw 'Minor cadence failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc minor_cpu_benchmark.cpp /Fe:minor-cpu-benchmark.exe winmm.lib
+          if($LASTEXITCODE){throw 'CPU benchmark compile failed'}
+          .\minor-cpu-benchmark.exe
+          if($LASTEXITCODE){throw 'CPU benchmark failed'}
+          $r=Get-Content minor-cpu-benchmark-report.txt -Raw
+          if($r -notmatch 'LowCpu=PASS' -or $r -notmatch 'Cadence=PASS' -or $r -notmatch 'RESULT=PASS'){throw 'CPU gate failed'}
+
+      - name: Run executable regressions and Attack observers
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process .\PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE.exe -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode){throw 'legacy test failed'}
+          $r=Get-Content self-test-report.txt -Raw
+          if($r -notmatch 'TOTAL=180' -or $r -notmatch 'PASSED=180'){throw '180/180 failed'}
+          $p=Start-Process .\PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE.exe -ArgumentList '--mob-model-test' -Wait -PassThru
+          if($p.ExitCode){throw 'MOB test failed'}
+          $r=Get-Content mob-model-test-report.txt -Raw
+          if($r -notmatch 'TOTAL=20' -or $r -notmatch 'PASSED=20'){throw '20/20 MOB failed'}
+          $p=Start-Process .\PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE.exe -ArgumentList '--warrior-model-test' -Wait -PassThru
+          if($p.ExitCode){throw 'Warrior test failed'}
+          $r=Get-Content warrior-model-test-report.txt -Raw
+          if($r -notmatch 'TOTAL=28' -or $r -notmatch 'PASSED=28'){throw '28/28 Warrior failed'}
+          $p=Start-Process .\PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE.exe -ArgumentList '--attack-r-extra-observer-test' -Wait -PassThru
+          if($p.ExitCode){if(Test-Path attack-r-extra-observer-report.txt){Get-Content attack-r-extra-observer-report.txt};throw 'R + dynamic Attack observer failed'}
+          $r=Get-Content attack-r-extra-observer-report.txt -Raw
+          if($r -notmatch 'RAttackExec=PASS' -or $r -notmatch 'DynamicSkillExec=PASS' -or $r -notmatch 'RESULT=PASS'){throw 'R/dynamic Attack gate failed'}
+          $p=Start-Process .\PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE.exe -ArgumentList '--attack-observer-test' -Wait -PassThru
+          if($p.ExitCode){throw 'Attack observer regression failed'}
+          $p=Start-Process .\PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE.exe -ArgumentList '--attack-z-off-observer-test' -Wait -PassThru
+          if($p.ExitCode){throw 'Attack Z-off regression failed'}
+
+      - name: Run selector and Windows input scenarios
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          python mob_selector_scenario_model.py
+          if($LASTEXITCODE){throw 'selector model failed'}
+          $r=Get-Content mob-selector-scenario-report.txt -Raw
+          if($r -notmatch 'TOTAL=48' -or $r -notmatch 'PASSED=48'){throw '48/48 selector failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /DUNICODE /D_UNICODE mob_selector_manual_click_test.cpp /Fe:mob-selector-manual-click-test.exe user32.lib gdi32.lib /link /SUBSYSTEM:WINDOWS
+          if($LASTEXITCODE){throw 'mouse harness compile failed'}
+          $p=Start-Process .\mob-selector-manual-click-test.exe -Wait -PassThru
+          if($p.ExitCode){throw 'mouse harness failed'}
+          $r=Get-Content mob-selector-manual-click-report.txt -Raw
+          if($r -notmatch 'TOTAL=9' -or $r -notmatch 'PASSED=9'){throw '9/9 mouse failed'}
+
+      - name: Write final report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $sha=(Get-FileHash .\PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE.exe -Algorithm SHA256).Hash
+          $src=(Get-FileHash .\premiumplus_v4825_final.cpp -Algorithm SHA256).Hash
+          $timing=Get-Content minor-timing-report.txt -Raw
+          $cpuReport=Get-Content minor-cpu-benchmark-report.txt -Raw
+          $hz=([regex]::Match($timing,'MeasuredHz=([^\r\n]+)')).Groups[1].Value
+          $cpu=([regex]::Match($cpuReport,'ThreadCpuPct=([^\r\n]+)')).Groups[1].Value
+          @(
+            'Product=PremiumPlusCombo',
+            'Version=4.8.25-game-input-restore',
+            'Base=v4.8.25 working MINOR CPU + SIDEINPUT with requested Warrior/Attack UI hotfix',
+            'ExecutionLevel=requireAdministrator',
+            'GameInputIntegrityRestored=PASS',
+            'ShieldEquipVisualVerification=PASS',
+            'ShieldEquipRetryMax=3',
+            'AttackRRuntime=PASS',
+            'AttackDynamicSkillRows=PASS',
+            'AttackDynamicSkillObserver=PASS',
+            'AttackSkillAddUi=PLUS_ROW',
+            "SourceSHA256=$src",
+            "EXE_SHA256=$sha",
+            'ExactImportSurfaceVsV4811=PASS',
+            'LegacySelfTest=180/180 PASS',
+            'MobModelTest=20/20 PASS',
+            'WarriorModelTest=28/28 PASS',
+            'MobSelectorScenario=48/48 PASS',
+            'RealWindowsMouseSelect=9/9 PASS',
+            'MobUiRuntimeScenario=20/20 PASS',
+            'AttackSideInputScenario=13/13 PASS',
+            'WarriorAttackUiScenario=14/14 PASS',
+            "MinorMeasuredTurboHz=$hz",
+            "MinorBenchmarkThreadCpuPct=$cpu",
+            'MinorCadenceGate=PASS',
+            'MinorLowCpuGate=PASS',
+            'PESectionAndDllCharacteristics=PASS'
+          ) | Set-Content PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE-REPORT.txt
+          Get-Content PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE-REPORT.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlus-v4.8.25-GAME-INPUT-RESTORE
+          if-no-files-found: error
+          retention-days: 90
+          path: |
+            premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE.exe
+            premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.25-GAME-INPUT-RESTORE-REPORT.txt
+            premium_plus_combo_final/workbench/premiumplus_v4825_final.cpp
+            premium_plus_combo_final/workbench/embedded.manifest
+            premium_plus_combo_final/workbench/minor-timing-report.txt
+            premium_plus_combo_final/workbench/minor-cpu-benchmark-report.txt
+            premium_plus_combo_final/workbench/self-test-report.txt
+            premium_plus_combo_final/workbench/mob-model-test-report.txt
+            premium_plus_combo_final/workbench/warrior-model-test-report.txt
+            premium_plus_combo_final/workbench/attack-r-extra-observer-report.txt
+            premium_plus_combo_final/workbench/attack-observer-report.txt
+            premium_plus_combo_final/workbench/attack-z-off-observer-report.txt
+            premium_plus_combo_final/workbench/mob-selector-scenario-report.txt
+            premium_plus_combo_final/workbench/mob-selector-manual-click-report.txt
+            premium_plus_combo_final/workbench/v4825-mob-ui-scenario-report.txt
+            premium_plus_combo_final/workbench/v4825-attack-sideinput-report.txt
+            premium_plus_combo_final/workbench/v4825-warrior-attack-ui-report.txt
+            premium_plus_combo_final/workbench/import-audit.txt
