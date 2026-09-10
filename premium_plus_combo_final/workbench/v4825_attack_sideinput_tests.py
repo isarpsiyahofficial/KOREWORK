@@ -38,7 +38,7 @@ t('WsReservationPublished','g_wsPriority=true;' in maybe)
 t('AutoMinorAttackYield','g_attackExclusive.load' in minor and 'g_wsPriority.load' in minor and 'continue;' in minor)
 t('PotionAttackYield','AttackSideInputReserved()' in pot)
 t('PotionLiveDisableRecheck',pot.count('PotionEnabledNow(hp)')>=2)
-t('HpMpToggleImmediatePersist','persistToggle=(id==IDC_HP_CHECK||id==IDC_MP_CHECK)' in wnd and 'ReadAttackUi(persistToggle)' in wnd)
+t('HpMpToggleImmediatePersist','case IDC_HP_CHECK:ReadAttackUi(true);break;' in wnd and 'case IDC_MP_CHECK:ReadAttackUi(true);break;' in wnd)
 
 # Small deterministic arbitration model: ATTACK owns the critical burst and W/S
 # deadline; side-input retries instead of queueing ahead. When ATTACK is idle,
