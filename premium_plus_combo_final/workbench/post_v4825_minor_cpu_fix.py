@@ -17,34 +17,33 @@ def span(src,sig):
             if depth==0: return start,i+1
     raise SystemExit('UNCLOSED '+sig)
 
+# Minor-only low-CPU timing path. Uses APIs that are already present in the
+# validated import surface: QPC + Sleep. Long waits sleep; only the final tiny
+# precision tail spins. Generic transport remains untouched for other modules.
 insert_at,_=span(s,'std::vector<INPUT> BuildMinorBatch(')
-helpers=r'''constexpr DWORD kCreateWaitableTimerHighResolution=0x00000002u;
-HANDLE CreateMinorTimer(){
-  HANDLE h=CreateWaitableTimerExW(nullptr,nullptr,kCreateWaitableTimerHighResolution,TIMER_ALL_ACCESS);
-  if(!h)h=CreateWaitableTimerW(nullptr,FALSE,nullptr);
-  return h;
-}
-void MinorWaitUntil(HANDLE timer,LONGLONG target,LONGLONG freq){
+helpers=r'''void MinorWaitUntil(LONGLONG target,LONGLONG freq){
   LARGE_INTEGER now{};
-  const LONGLONG spinTicks=std::max<LONGLONG>(1,freq/12500); // ~80 us precision tail
+  const LONGLONG spinTicks=std::max<LONGLONG>(1,freq/10000); // ~100 us precision tail
+  const LONGLONG sleepFloor=std::max<LONGLONG>(spinTicks+1,freq/2500); // ~400 us
   for(;;){
     QueryPerformanceCounter(&now);LONGLONG left=target-now.QuadPart;if(left<=0)break;
-    if(left<=spinTicks){YieldProcessor();continue;}
-    LONGLONG sleepTicks=left-spinTicks;
-    LONGLONG hundredNs=(sleepTicks*10000000LL)/freq;
-    if(timer&&hundredNs>=1000){
-      LARGE_INTEGER due{};due.QuadPart=-std::max<LONGLONG>(1,hundredNs);
-      if(SetWaitableTimer(timer,&due,0,nullptr,nullptr,FALSE)){WaitForSingleObject(timer,INFINITE);continue;}
-    }
-    if(left>freq/2000)Sleep(0); else YieldProcessor();
+    if(left>sleepFloor){Sleep(1);continue;}
+    if(left>spinTicks){Sleep(0);continue;}
+    YieldProcessor();
   }
 }
-void MinorDelayUs(HANDLE timer,int us,LONGLONG freq){
-  if(us<=0)return;LARGE_INTEGER now{};QueryPerformanceCounter(&now);
-  LONGLONG ticks=std::max<LONGLONG>(1,(freq*(LONGLONG)us)/1000000LL);
-  MinorWaitUntil(timer,now.QuadPart+ticks,freq);
+void MinorDelayUs(int us,LONGLONG freq){
+  if(us<=0)return;
+  if(us>=900){
+    LARGE_INTEGER begin{},now{};QueryPerformanceCounter(&begin);Sleep(1);
+    const LONGLONG target=begin.QuadPart+std::max<LONGLONG>(1,(freq*(LONGLONG)us)/1000000LL);
+    QueryPerformanceCounter(&now);if(now.QuadPart<target)MinorWaitUntil(target,freq);return;
+  }
+  LARGE_INTEGER now{};QueryPerformanceCounter(&now);
+  const LONGLONG ticks=std::max<LONGLONG>(1,(freq*(LONGLONG)us)/1000000LL);
+  MinorWaitUntil(now.QuadPart+ticks,freq);
 }
-UINT MinorSendInputsLowCpu(HANDLE timer,const INPUT* inputs,UINT count,LONGLONG freq){
+UINT MinorSendInputsLowCpu(const INPUT* inputs,UINT count,LONGLONG freq){
   if(!inputs||!count)return 0;
   if(BridgeReceiverLive()&&PublishBridgeInputsUnlocked(inputs,count))return count;
   UINT done=0;
@@ -53,16 +52,16 @@ UINT MinorSendInputsLowCpu(HANDLE timer,const INPUT* inputs,UINT count,LONGLONG 
     INPUT first=NativeNormalizedInput(inputs[done]);
     if(SendInput(1,&first,sizeof(INPUT))!=1)break;
     if(pair){
-      MinorDelayUs(timer,1000,freq);
+      MinorDelayUs(1000,freq);
       INPUT second=NativeNormalizedInput(inputs[done+1]);
       if(SendInput(1,&second,sizeof(INPUT))!=1){
-        MinorDelayUs(timer,1000,freq);
+        MinorDelayUs(1000,freq);
         if(SendInput(1,&second,sizeof(INPUT))!=1)break;
       }
-      done+=2;MinorDelayUs(timer,75,freq);
+      done+=2;MinorDelayUs(75,freq);
     }else{
       const bool up=(inputs[done].ki.dwFlags&KEYEVENTF_KEYUP)!=0;
-      ++done;MinorDelayUs(timer,up?75:1000,freq);
+      ++done;MinorDelayUs(up?75:1000,freq);
     }
   }
   return done;
@@ -72,7 +71,7 @@ s=s[:insert_at]+helpers+s[insert_at:]
 
 a,b=span(s,'void MinorWorker()')
 new=r'''void MinorWorker(){
-  timeBeginPeriod(1);LARGE_INTEGER fq{};QueryPerformanceFrequency(&fq);HANDLE timer=CreateMinorTimer();
+  timeBeginPeriod(1);LARGE_INTEGER fq{};QueryPerformanceFrequency(&fq);
   LONGLONG nextTick=0;int lastRate=0;int autoKnownBar=0;bool autoWasRunning=false;
   std::array<INPUT,6> manualBatch{};std::array<int,3> cachedSeq{-1,-1,-1};bool batchReady=false;
   while(g_running){
@@ -80,7 +79,7 @@ new=r'''void MinorWorker(){
     if(!r.powerEnabled||!g_rogueCategoryEnabled||!g_minorActive||g_cureExclusive||g_potionExclusive||g_chatMode){nextTick=0;autoKnownBar=0;autoWasRunning=false;Sleep(2);continue;}
     int rate=g_turbo.load()?240:120;LARGE_INTEGER now{};QueryPerformanceCounter(&now);LONGLONG step=std::max<LONGLONG>(1,fq.QuadPart/rate);
     if(!nextTick||rate!=lastRate){nextTick=now.QuadPart;lastRate=rate;}
-    if(now.QuadPart<nextTick){MinorWaitUntil(timer,nextTick,fq.QuadPart);continue;}
+    if(now.QuadPart<nextTick){MinorWaitUntil(nextTick,fq.QuadPart);continue;}
     RogueSettings fresh;{std::lock_guard<std::mutex>lk(g_settingsMutex);fresh=g_rogue;}
     if(!fresh.powerEnabled||!g_rogueCategoryEnabled||!g_minorActive||g_cureExclusive||g_potionExclusive||g_chatMode){nextTick=0;autoKnownBar=0;autoWasRunning=false;continue;}
     const bool autoOwned=g_autoMinorOwned.load(std::memory_order_acquire)&&fresh.autoMinorEnabled;
@@ -97,53 +96,50 @@ new=r'''void MinorWorker(){
       autoKnownBar=0;autoWasRunning=false;
       if(!batchReady||cachedSeq!=fresh.seq){cachedSeq=fresh.seq;for(int i=0;i<3;i++){BuildKeyInput(manualBatch[i*2],fresh.seq[i],false);BuildKeyInput(manualBatch[i*2+1],fresh.seq[i],true);}batchReady=true;}
       FifoTicketGuard sequence(g_gameInputGate);
-      MinorSendInputsLowCpu(timer,manualBatch.data(),(UINT)manualBatch.size(),fq.QuadPart);
+      MinorSendInputsLowCpu(manualBatch.data(),(UINT)manualBatch.size(),fq.QuadPart);
     }
     QueryPerformanceCounter(&now);nextTick+=step;if(now.QuadPart-nextTick>step*2)nextTick=now.QuadPart+step;
   }
-  if(timer)CloseHandle(timer);timeEndPeriod(1);
+  timeEndPeriod(1);
 }'''
 s=s[:a]+new+s[b:]
 
-# Actual compiled-executable timing/CPU gate. It exercises the same wait helpers
-# with the native Minor workload shape: 3 x (1000 us hold + 75 us gap) per cycle.
+# Compiled release timing gate: actual production wait helpers, native workload
+# shape, no additional Kernel32 imports. CPU percentage is measured by a separate
+# CI benchmark executable so the release PE surface stays exact.
 insert,_=span(s,'bool RunSelfTest()')
-test=r'''static ULONGLONG Ft64(const FILETIME& f){ULARGE_INTEGER u{};u.LowPart=f.dwLowDateTime;u.HighPart=f.dwHighDateTime;return u.QuadPart;}
-bool RunMinorCpuTimingTest(){
-  timeBeginPeriod(1);HANDLE timer=CreateMinorTimer();LARGE_INTEGER fq{},start{},now{};QueryPerformanceFrequency(&fq);
-  FILETIME c0{},e0{},k0{},u0{},c1{},e1{},k1{},u1{};GetThreadTimes(GetCurrentThread(),&c0,&e0,&k0,&u0);
-  QueryPerformanceCounter(&start);LONGLONG next=start.QuadPart;const int rate=240,cycles=240;const LONGLONG step=std::max<LONGLONG>(1,fq.QuadPart/rate);
+test=r'''bool RunMinorTimingTest(){
+  timeBeginPeriod(1);LARGE_INTEGER fq{},start{},now{};QueryPerformanceFrequency(&fq);QueryPerformanceCounter(&start);
+  LONGLONG next=start.QuadPart;const int rate=240,cycles=240;const LONGLONG step=std::max<LONGLONG>(1,fq.QuadPart/rate);
   for(int i=0;i<cycles;i++){
-    for(int k=0;k<3;k++){MinorDelayUs(timer,1000,fq.QuadPart);MinorDelayUs(timer,75,fq.QuadPart);}
-    next+=step;QueryPerformanceCounter(&now);if(now.QuadPart<next)MinorWaitUntil(timer,next,fq.QuadPart);else if(now.QuadPart-next>step*2)next=now.QuadPart;
+    for(int k=0;k<3;k++){MinorDelayUs(1000,fq.QuadPart);MinorDelayUs(75,fq.QuadPart);}
+    next+=step;QueryPerformanceCounter(&now);if(now.QuadPart<next)MinorWaitUntil(next,fq.QuadPart);else if(now.QuadPart-next>step*2)next=now.QuadPart;
   }
-  QueryPerformanceCounter(&now);GetThreadTimes(GetCurrentThread(),&c1,&e1,&k1,&u1);if(timer)CloseHandle(timer);timeEndPeriod(1);
-  double wallMs=1000.0*(double)(now.QuadPart-start.QuadPart)/(double)fq.QuadPart;
-  double cpuMs=(double)((Ft64(k1)-Ft64(k0))+(Ft64(u1)-Ft64(u0)))/10000.0;
-  double hz=wallMs>0?cycles*1000.0/wallMs:0.0;double cpuPct=wallMs>0?100.0*cpuMs/wallMs:100.0;
-  bool cadence=hz>=225.0&&hz<=255.0;bool cpu=cpuPct<=30.0;
-  std::ofstream f("minor-cpu-timing-report.txt",std::ios::trunc);f<<"TargetHz=240\nMeasuredHz="<<hz<<"\nWallMs="<<wallMs<<"\nThreadCpuMs="<<cpuMs<<"\nThreadCpuPct="<<cpuPct<<"\nCadence="<<(cadence?"PASS":"FAIL")<<"\nLowCpu="<<(cpu?"PASS":"FAIL")<<"\nRESULT="<<((cadence&&cpu)?"PASS":"FAIL")<<"\n";
-  return cadence&&cpu;
+  QueryPerformanceCounter(&now);timeEndPeriod(1);
+  double wallMs=1000.0*(double)(now.QuadPart-start.QuadPart)/(double)fq.QuadPart;double hz=wallMs>0?cycles*1000.0/wallMs:0.0;
+  bool cadence=hz>=225.0&&hz<=255.0;
+  std::ofstream f("minor-timing-report.txt",std::ios::trunc);f<<"TargetHz=240\nMeasuredHz="<<hz<<"\nWallMs="<<wallMs<<"\nCadence="<<(cadence?"PASS":"FAIL")<<"\nRESULT="<<(cadence?"PASS":"FAIL")<<"\n";
+  return cadence;
 }
 
 '''
 s=s[:insert]+test+s[insert:]
 
-# Wire the isolated diagnostic into the existing CLI without altering normal startup.
 needle='int APIENTRY wWinMain(HINSTANCE hi,HINSTANCE,LPWSTR cmd,int show){g_instance=hi;'
 if needle not in s: raise SystemExit('WMAIN_MARKER_MISSING')
-s=s.replace(needle,needle+'if(cmd&&wcsstr(cmd,L"--minor-cpu-timing-test"))return RunMinorCpuTimingTest()?0:10;',1)
+s=s.replace(needle,needle+'if(cmd&&wcsstr(cmd,L"--minor-timing-test"))return RunMinorTimingTest()?0:10;',1)
 
 minor=s[span(s,'void MinorWorker()')[0]:span(s,'void MinorWorker()')[1]]
 checks={
  'MAX_RATE_120':'?240:120' in minor,
  'TURBO_RATE_240':'?240:120' in minor,
  'MANUAL_THREE_PAIRS':'std::array<INPUT,6>' in minor,
- 'LOW_CPU_TIMER':'MinorWaitUntil(timer,nextTick' in minor and 'MinorSendInputsLowCpu' in minor,
+ 'LOW_CPU_WAIT':'MinorWaitUntil(nextTick' in minor and 'MinorSendInputsLowCpu' in minor,
  'CACHED_BATCH':'cachedSeq!=fresh.seq' in minor,
  'SIDEINPUT_GUARD':'g_attackExclusive.load' in minor and 'g_wsPriority.load' in minor,
  'GENERIC_PRECISE_DELAY_UNTOUCHED':'void PreciseDelayUs(int microseconds)' in s,
- 'CPU_TEST_MODE':'--minor-cpu-timing-test' in s and 'minor-cpu-timing-report.txt' in s,
+ 'NO_NEW_TIMER_IMPORTS':all(x not in s for x in ['CreateWaitableTimerExW','CreateWaitableTimerW','SetWaitableTimer','GetThreadTimes','GetCurrentThread']),
+ 'TIMING_TEST_MODE':'--minor-timing-test' in s and 'minor-timing-report.txt' in s,
 }
 for k,v in checks.items():
     print(k+'='+('PASS' if v else 'FAIL'))
