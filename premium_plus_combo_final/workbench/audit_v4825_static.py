@@ -62,7 +62,7 @@ checks={
  'AUTO_MINOR_YIELDS_TO_ATTACK':'g_attackExclusive.load' in minor and 'g_wsPriority.load' in minor,
  'POTION_YIELDS_TO_ATTACK':'AttackSideInputReserved()' in potion,
  'POTION_RECHECKS_LIVE_TOGGLE':'PotionEnabledNow(hp)' in potion and potion.count('PotionEnabledNow(hp)')>=2,
- 'HP_MP_TOGGLE_PERSISTS':'persistToggle=(id==IDC_HP_CHECK||id==IDC_MP_CHECK)' in wnd and 'ReadAttackUi(persistToggle)' in wnd,
+ 'HP_MP_TOGGLE_PERSISTS':'case IDC_HP_CHECK:ReadAttackUi(true);break;' in wnd and 'case IDC_MP_CHECK:ReadAttackUi(true);break;' in wnd,
 }
 for k,v in checks.items():
     print(k+'=' + ('PASS' if v else 'FAIL'))
