@@ -60,7 +60,6 @@ s=s[:a]+ws+s[b:]
 # W/S reservation (if enabled) has been published. This closes the old race in
 # which side inputs could obtain FIFO tickets between Z/bar/skill phases.
 a,b=span(s,'void ExecuteAttack(const AttackSettings& a)')
-old_body=s[a:b]
 new_body='''void ExecuteAttack(const AttackSettings& a){
   if(!g_running||!g_attackActive||g_cureExclusive||g_chatMode)return;
   g_attackExclusive=true;
@@ -92,7 +91,6 @@ s=s[:a]+w+s[b:]
 # power/category is off, or chat mode owns input. Cure remains a transient hard
 # exclusion, but it no longer forces an ATTACK state reset. Potion is side-band.
 a,b=span(s,'void AttackWorker()')
-old_attack_worker=s[a:b]
 new_attack_worker='''void AttackWorker(){bool wasReady=false;while(g_running){RogueSettings r;AttackSettings a;{std::lock_guard<std::mutex>lk(g_settingsMutex);r=g_rogue;a=g_attack;}bool ready=r.powerEnabled&&g_attackCategoryEnabled&&g_attackActive&&!g_chatMode;if(!ready){wasReady=false;g_attackKnownBar=0;ClearWsPending();Sleep(1);continue;}if(g_cureExclusive){Sleep(1);continue;}if(!wasReady){g_attackKnownBar=0;ClearWsPending();wasReady=true;}ExecuteAttack(a);if(g_running&&g_attackActive&&!g_cureExclusive&&!g_chatMode){if(a.wCombo||a.sCombo)WaitWsCycleCompletion(a);else InterruptibleAttackDelay(a.delayMs);}}g_attackKnownBar=0;ClearWsPending();}'''
 s=s[:a]+new_attack_worker+s[b:]
 
@@ -121,14 +119,16 @@ new_potion='''bool UsePotion(bool hp,const AttackSettings&a){
 }'''
 s=s[:a]+new_potion+s[b:]
 
-# 4) HP/MP enable toggles are runtime-effective already; persist them on the
-# toggle event as well so OFF remains OFF after restart. Other live edit fields
-# keep the established non-persist-until-save behavior.
-old='if(g_ui.saveAttack&&((id>=1540&&id<=1595)||(id>=1610&&id<=1613)))ReadAttackUi(false);'
-new='if(g_ui.saveAttack&&((id>=1540&&id<=1595)||(id>=1610&&id<=1613))){const bool persistToggle=(id==IDC_HP_CHECK||id==IDC_MP_CHECK);ReadAttackUi(persistToggle);}'
-if s.count(old)!=1:
-    raise SystemExit(f'WM_COMMAND live-read marker count={s.count(old)}')
-s=s.replace(old,new,1)
+# 4) The generated v4.8.24 WndProc has additional module command ranges, so do
+# not depend on the old one-line live-read text. Add explicit stable HP/MP cases.
+a,b=span(s,'LRESULT CALLBACK WndProc(')
+wnd=s[a:b]
+if 'case IDC_HP_CHECK:' not in wnd:
+    marker='case IDC_HP_CAL:'
+    if marker not in wnd:
+        raise SystemExit('WM_COMMAND HP_CAL case missing')
+    wnd=wnd.replace(marker,'case IDC_HP_CHECK:ReadAttackUi(true);break;case IDC_MP_CHECK:ReadAttackUi(true);break;'+marker,1)
+s=s[:a]+wnd+s[b:]
 
 # Hard invariants for this surgical patch.
 for sig in ['void CureWorker()','void RWorker()','void VitalsWorker()','void CreateRoguePage()','void CreateAttackPage()']:
@@ -137,6 +137,9 @@ if 'g_wsPriority=true;' not in s:
     raise SystemExit('WS_PRIORITY_NOT_PUBLISHED')
 if 'AttackSideInputReserved()' not in s or 'PotionEnabledNow(hp)' not in s:
     raise SystemExit('SIDEINPUT_GUARD_MISSING')
+wnd=span(s,'LRESULT CALLBACK WndProc(')
+if 'case IDC_HP_CHECK:ReadAttackUi(true);break;' not in s[wnd[0]:wnd[1]] or 'case IDC_MP_CHECK:ReadAttackUi(true);break;' not in s[wnd[0]:wnd[1]]:
+    raise SystemExit('HP_MP_PERSIST_CASE_MISSING')
 
 p.write_text(s,encoding='utf-8',newline='\n')
 print('V4825_ATTACK_SIDEINPUT_FIX=APPLIED')
