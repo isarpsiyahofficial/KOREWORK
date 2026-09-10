@@ -2,7 +2,7 @@ name: PremiumPlus v4.8.25 FINAL
 
 on:
   push:
-    branches: [ premiumplus-v4825-mob-ui-runtime-fix, fix/premiumplus-v4825-attack-sideinput-20260910 ]
+    branches: [ premiumplus-v4825-mob-ui-runtime-fix, fix/premiumplus-v4825-attack-sideinput-20260910, fix/premiumplus-v4825-minor-cpu-20260910 ]
     paths:
       - '.github/workflows/premiumplus-v4825-final.yml'
       - 'premium_plus_combo_final/workbench/build_v4825_final_source.py'
@@ -10,6 +10,7 @@ on:
       - 'premium_plus_combo_final/workbench/post_v4825_responsive_layout.py'
       - 'premium_plus_combo_final/workbench/post_v4825_compile_order_fix.py'
       - 'premium_plus_combo_final/workbench/post_v4825_attack_sideinput_fix.py'
+      - 'premium_plus_combo_final/workbench/post_v4825_minor_cpu_fix.py'
       - 'premium_plus_combo_final/workbench/audit_v4825_static.py'
       - 'premium_plus_combo_final/workbench/audit_v4825_pe.py'
       - 'premium_plus_combo_final/workbench/v4825_mob_ui_scenario_tests.py'
@@ -69,6 +70,18 @@ jobs:
           if($LASTEXITCODE){throw 'release manifest failed'}
           python audit_v4825_pe.py
           if($LASTEXITCODE){throw 'PE/import audit failed'}
+
+      - name: Verify Minor 240Hz timing and CPU load
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process .\PremiumPlusCombo-v4.8.25-FINAL.exe -ArgumentList '--minor-cpu-timing-test' -Wait -PassThru
+          if($p.ExitCode){if(Test-Path minor-cpu-timing-report.txt){Get-Content minor-cpu-timing-report.txt};throw 'Minor CPU/timing test failed'}
+          if(-not (Test-Path minor-cpu-timing-report.txt)){throw 'Minor CPU/timing report missing'}
+          $r=Get-Content minor-cpu-timing-report.txt -Raw
+          Get-Content minor-cpu-timing-report.txt
+          if($r -notmatch 'Cadence=PASS' -or $r -notmatch 'LowCpu=PASS' -or $r -notmatch 'RESULT=PASS'){throw 'Minor CPU/timing gate failed'}
 
       - name: Run legacy MOB and Warrior regressions
         shell: pwsh
@@ -132,12 +145,15 @@ jobs:
         run: |
           $sha=(Get-FileHash .\PremiumPlusCombo-v4.8.25-FINAL.exe -Algorithm SHA256).Hash
           $src=(Get-FileHash .\premiumplus_v4825_final.cpp -Algorithm SHA256).Hash
+          $minor=Get-Content .\minor-cpu-timing-report.txt -Raw
+          $hz=([regex]::Match($minor,'MeasuredHz=([^\r\n]+)')).Groups[1].Value
+          $cpu=([regex]::Match($minor,'ThreadCpuPct=([^\r\n]+)')).Groups[1].Value
           $def='UNAVAILABLE_OR_SKIPPED'
           if(Test-Path defender-scan.txt){$d=Get-Content defender-scan.txt -Raw;if($d -match 'found no threats'){$def='NO_THREATS'}elseif($d -match 'Threat'){$def='SEE_DEFENDER_LOG'}}
           @(
             'Product=PremiumPlusCombo',
-            'Version=4.8.25-sideinput-hotfix',
-            'Base=v4.8.25 FINAL validated 2026-09-08',
+            'Version=4.8.25-minor-cpu-hotfix',
+            'Base=v4.8.25 SIDEINPUT HOTFIX passed 2026-09-10',
             "SourceSHA256=$src",
             "EXE_SHA256=$sha",
             'StableCorePreserved=PASS',
@@ -152,6 +168,14 @@ jobs:
             'AttackWsPotionCancellationRemoved=PASS',
             'AutoMinorYieldsToAttackCriticalInput=PASS',
             'HpMpToggleImmediatePersist=PASS',
+            'MinorTargetMaximumHz=120',
+            'MinorTargetTurboHz=240',
+            "MinorMeasuredTurboHz=$hz",
+            "MinorThreadCpuPct=$cpu",
+            'MinorCadenceGate=PASS',
+            'MinorLowCpuGate=PASS',
+            'MinorNativeKeyHoldPreserved=PASS',
+            'MinorInputBatchCache=PASS',
             'ResponsiveLayoutDpi100_125_150_200=PASS',
             'PriestSidebarStyle=PASS',
             'MobTabIsolation=PASS',
@@ -167,7 +191,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: PremiumPlus-v4.8.25-SIDEINPUT-HOTFIX
+          name: PremiumPlus-v4.8.25-MINOR-CPU-HOTFIX
           if-no-files-found: error
           retention-days: 90
           path: |
@@ -175,6 +199,7 @@ jobs:
             premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.25-FINAL-REPORT.txt
             premium_plus_combo_final/workbench/premiumplus_v4825_final.cpp
             premium_plus_combo_final/workbench/v4825-final-source-sha.txt
+            premium_plus_combo_final/workbench/minor-cpu-timing-report.txt
             premium_plus_combo_final/workbench/self-test-report.txt
             premium_plus_combo_final/workbench/mob-model-test-report.txt
             premium_plus_combo_final/workbench/warrior-model-test-report.txt
