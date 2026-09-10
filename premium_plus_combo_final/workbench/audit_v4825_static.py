@@ -14,9 +14,6 @@ def body(s,sig):
             if d==0:return s[p:i+1]
     raise SystemExit('UNCLOSED '+sig)
 
-# These runtime areas must remain byte-for-byte identical to v4.8.24.
-# Minor/ATTACK/W-S are intentionally excluded only because the side-input
-# arbitration patch changes those three workers surgically.
 protected=[
  'void CureWorker()','void RWorker()','void VitalsWorker()','void MobSkillWorker()',
  'void MobChaseWorker()','void MobScrollWorker()','void MobPriestWorker()',
@@ -36,6 +33,9 @@ maybe_ws=body(new,'void MaybeSendWsCombo(')
 wait_ws=body(new,'bool WaitWsCycleCompletion(const AttackSettings& a)')
 potion=body(new,'bool UsePotion(bool hp,const AttackSettings&a)')
 wnd=body(new,'LRESULT CALLBACK WndProc(')
+waiter=body(new,'void MinorWaitUntil(')
+sender=body(new,'UINT MinorSendInputsLowCpu(')
+cpu_test=body(new,'bool RunMinorCpuTimingTest()')
 
 checks={
  'VERSION_4825':'Premium Plus Combo | v4.8.25' in new,
@@ -53,7 +53,6 @@ checks={
  'RESPONSIVE_SCALE_Y':'g_layoutScaleY=std::max(1.0' in body(new,'void LayoutChrome()'),
  'RESPONSIVE_CHILD_MOVE':'MoveWindow(e.hwnd' in body(new,'void LayoutChrome()'),
 
- # Side-input concurrency gates.
  'ATTACK_WORKER_NOT_BLOCKED_BY_POTION':'g_potionExclusive' not in attack,
  'ATTACK_EXECUTE_NOT_ABORTED_BY_POTION':'g_potionExclusive' not in execute,
  'WS_WORKER_NOT_CANCELLED_BY_POTION':'g_potionExclusive' not in ws and 'g_potionExclusive' not in maybe_ws and 'g_potionExclusive' not in wait_ws,
@@ -63,6 +62,19 @@ checks={
  'POTION_YIELDS_TO_ATTACK':'AttackSideInputReserved()' in potion,
  'POTION_RECHECKS_LIVE_TOGGLE':'PotionEnabledNow(hp)' in potion and potion.count('PotionEnabledNow(hp)')>=2,
  'HP_MP_TOGGLE_PERSISTS':'case IDC_HP_CHECK:ReadAttackUi(true);break;' in wnd and 'case IDC_MP_CHECK:ReadAttackUi(true);break;' in wnd,
+
+ # Minor CPU hotfix invariants.
+ 'MINOR_RATE_120_240':'g_turbo.load()?240:120' in minor,
+ 'MINOR_HIGH_RES_TIMER':'CreateWaitableTimerExW' in new and 'kCreateWaitableTimerHighResolution' in new,
+ 'MINOR_KERNEL_WAIT':'SetWaitableTimer' in waiter and 'WaitForSingleObject' in waiter,
+ 'MINOR_PRECISION_TAIL':'freq/12500' in waiter,
+ 'MINOR_OUTER_SPIN_REMOVED':'if(now.QuadPart<nextTick){MinorWaitUntil(timer,nextTick' in minor,
+ 'MINOR_MANUAL_LOWCPU_PATH':'MinorSendInputsLowCpu(timer,manualBatch.data()' in minor,
+ 'MINOR_BATCH_CACHED':'cachedSeq!=fresh.seq' in minor and 'std::array<INPUT,6>' in minor,
+ 'MINOR_NATIVE_HOLD_PRESERVED':'MinorDelayUs(timer,1000,freq)' in sender,
+ 'MINOR_RELEASE_GAP_PRESERVED':'MinorDelayUs(timer,75,freq)' in sender,
+ 'MINOR_GENERIC_TRANSPORT_UNCHANGED':'void PreciseDelayUs(int microseconds)' in new and 'UINT ReferenceSendInputsUnlocked' in new,
+ 'MINOR_CPU_TEST_MODE':'--minor-cpu-timing-test' in new and 'MeasuredHz=' in cpu_test and 'ThreadCpuPct=' in cpu_test,
 }
 for k,v in checks.items():
     print(k+'=' + ('PASS' if v else 'FAIL'))
