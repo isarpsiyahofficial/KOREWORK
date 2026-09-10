@@ -14,12 +14,14 @@ def body(s,sig):
             if d==0:return s[p:i+1]
     raise SystemExit('UNCLOSED '+sig)
 
-# Deliberate hotfix scope: ExecuteAttack/Attack UI and WarriorRightClickSlot are allowed
-# to change; all unrelated runtime workers/pages remain byte-for-byte protected.
+# Deliberate hotfix scope: ExecuteAttack/Attack UI, WarriorRightClickSlot and the
+# idle scheduling shell of Minor/R/Attack/W-S/MobSkill/WarriorEcho may change.
+# Their active input/cadence semantics are checked explicitly below. All other
+# runtime workers/pages remain byte-for-byte protected.
 protected=[
- 'void CureWorker()','void RWorker()','void VitalsWorker()','void MobSkillWorker()',
+ 'void CureWorker()','void VitalsWorker()',
  'void MobChaseWorker()','void MobScrollWorker()','void MobPriestWorker()',
- 'void WarriorWorker()','void WarriorEchoWorker()','void WarriorBattleCryWorker()',
+ 'void WarriorWorker()','void WarriorBattleCryWorker()',
  'bool WarriorResolveInventory','void CreateWarriorPage()',
  'void CreateRoguePage()','void CreatePriestPage()'
 ]
@@ -28,9 +30,12 @@ for sig in protected:
 print('PROTECTED_RUNTIME_CORE=PASS')
 
 minor=body(new,'void MinorWorker()')
+rworker=body(new,'void RWorker()')
 attack=body(new,'void AttackWorker()')
 execute=body(new,'void ExecuteAttack(const AttackSettings& a)')
 ws=body(new,'void WsWorker()')
+mobskill=body(new,'void MobSkillWorker()')
+echo=body(new,'void WarriorEchoWorker()')
 maybe_ws=body(new,'void MaybeSendWsCombo(')
 wait_ws=body(new,'bool WaitWsCycleCompletion(const AttackSettings& a)')
 potion=body(new,'bool UsePotion(bool hp,const AttackSettings&a)')
@@ -52,7 +57,7 @@ checks={
  'MOB_FAIL_CLOSED_CONFIRM':'TargetHpBarVisible(game)&&HeaderMatchesTarget' in body(new,'bool ConfirmMobCandidate'),
  'MOB_TARGET_WORKER_CONFIRM_GATE':'g_mobTargetConfirmed=true' in body(new,'void MobTargetWorker()'),
  'MOB_R_ONLY_AFTER_CONFIRM':'g_mobTargetConfirmed.load()' in body(new,'void MobChaseWorker()'),
- 'MOB_SKILL_ONLY_AFTER_CONFIRM':'g_mobTargetConfirmed.load()' in body(new,'void MobSkillWorker()'),
+ 'MOB_SKILL_ONLY_AFTER_CONFIRM':'g_mobTargetConfirmed.load()' in mobskill,
  'THIN_RED_SUPPORT':'c*12>=n' in body(new,'MobMaskSig MakeMobMaskSig'),
  'MOB_TEST_20':'return total==20&&pass==20;' in body(new,'bool RunMobModelTest()'),
  'RESPONSIVE_BASE_RECTS':'g_uiBaseRects.push_back' in new,
@@ -82,6 +87,21 @@ checks={
  'MINOR_GENERIC_TRANSPORT_UNCHANGED':'void PreciseDelayUs(int microseconds)' in new and 'UINT ReferenceSendInputsUnlocked' in new,
  'MINOR_PATCH_NO_NEW_APIS':all(x not in injected for x in forbidden),
  'MINOR_TIMING_TEST_MODE':'--minor-timing-test' in new and 'MeasuredHz=' in timing_test and 'minor-timing-report.txt' in timing_test,
+
+ # CPU-only worker allowances: active behavior remains explicitly pinned.
+ 'MINOR_TIMER_DEFERRED':'bool timer1ms=false' in minor and minor.find('timeBeginPeriod(1)')>minor.find('if(!featureReady)'),
+ 'MINOR_IDLE_BACKOFF':'Sleep(20);continue;' in minor,
+ 'R_TIMER_DEFERRED':'bool timer1ms=false' in rworker and rworker.find('timeBeginPeriod(1)')>rworker.find('if(!featureReady)'),
+ 'R_IDLE_BACKOFF':'Sleep(20);continue;' in rworker,
+ 'R_ACTIVE_CORE_PRESERVED':"ReferenceTapKey('R')" in rworker and 'g_turbo.load()?r.rTurbo:r.rMax' in rworker and '1000/rate' in rworker and 'g_rPauseUntil' in rworker,
+ 'ATTACK_IDLE_BACKOFF':'Sleep(15);continue;' in attack,
+ 'WS_IDLE_BACKOFF':'Sleep(g_attackActive.load()?1:15)' in ws,
+ 'WS_ACTIVE_CORE_PRESERVED':'DirectTimedTapUnlocked(\'W\',kWsVisibleHoldUs,kWsReleaseGapUs)' in ws and 'DirectTimedTapUnlocked(\'S\',kWsVisibleHoldUs,kWsReleaseGapUs)' in ws and 'InterruptibleAttackDelayFrom' in ws,
+ 'MOB_SKILL_IDLE_BACKOFF':'if(!ready){was=false;Sleep(20);continue;}' in mobskill,
+ 'MOB_SKILL_ACTIVE_CORE_PRESERVED':'DirectTimedTapUnlocked(BarToVk(e.bar),7000,500)' in mobskill and 'DirectTimedTapUnlocked(SlotToVk(e.slot),7000,500)' in mobskill and 'std::clamp(e.delayMs,1,1000)' in mobskill,
+ 'ECHO_TIMER_DEFERRED':'bool timer1ms=false' in echo and echo.find('timeBeginPeriod(1)')>echo.find('if(!ready)'),
+ 'ECHO_IDLE_BACKOFF':'Sleep(20);continue;' in echo,
+ 'ECHO_ACTIVE_CORE_PRESERVED':'WarriorTimedIntervalMs(w,i)' in echo and 'WarriorCastBarSlot(game,bar,slot)' in echo and 'g_echoFireCount.fetch_add(1)' in echo,
 
  'WARRIOR_EQUIP_RETRIES':'for(int attempt=0;attempt<3&&!changed;attempt++)' in warrior_equip,
  'WARRIOR_EQUIP_VISUAL_CONFIRM':'WarriorWaitSlotChanged(grid,slot,before,100)' in warrior_equip and 'return changed;' in warrior_equip,
