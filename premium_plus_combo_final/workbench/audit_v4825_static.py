@@ -35,7 +35,7 @@ potion=body(new,'bool UsePotion(bool hp,const AttackSettings&a)')
 wnd=body(new,'LRESULT CALLBACK WndProc(')
 waiter=body(new,'void MinorWaitUntil(')
 sender=body(new,'UINT MinorSendInputsLowCpu(')
-cpu_test=body(new,'bool RunMinorCpuTimingTest()')
+timing_test=body(new,'bool RunMinorTimingTest()')
 
 checks={
  'VERSION_4825':'Premium Plus Combo | v4.8.25' in new,
@@ -63,18 +63,18 @@ checks={
  'POTION_RECHECKS_LIVE_TOGGLE':'PotionEnabledNow(hp)' in potion and potion.count('PotionEnabledNow(hp)')>=2,
  'HP_MP_TOGGLE_PERSISTS':'case IDC_HP_CHECK:ReadAttackUi(true);break;' in wnd and 'case IDC_MP_CHECK:ReadAttackUi(true);break;' in wnd,
 
- # Minor CPU hotfix invariants.
  'MINOR_RATE_120_240':'g_turbo.load()?240:120' in minor,
- 'MINOR_HIGH_RES_TIMER':'CreateWaitableTimerExW' in new and 'kCreateWaitableTimerHighResolution' in new,
- 'MINOR_KERNEL_WAIT':'SetWaitableTimer' in waiter and 'WaitForSingleObject' in waiter,
- 'MINOR_PRECISION_TAIL':'freq/12500' in waiter,
- 'MINOR_OUTER_SPIN_REMOVED':'if(now.QuadPart<nextTick){MinorWaitUntil(timer,nextTick' in minor,
- 'MINOR_MANUAL_LOWCPU_PATH':'MinorSendInputsLowCpu(timer,manualBatch.data()' in minor,
+ 'MINOR_LONG_WAIT_SLEEPS':'if(left>sleepFloor){Sleep(1);continue;}' in waiter,
+ 'MINOR_MID_WAIT_YIELDS':'if(left>spinTicks){Sleep(0);continue;}' in waiter,
+ 'MINOR_PRECISION_TAIL':'freq/10000' in waiter,
+ 'MINOR_OUTER_SPIN_REMOVED':'if(now.QuadPart<nextTick){MinorWaitUntil(nextTick' in minor,
+ 'MINOR_MANUAL_LOWCPU_PATH':'MinorSendInputsLowCpu(manualBatch.data()' in minor,
  'MINOR_BATCH_CACHED':'cachedSeq!=fresh.seq' in minor and 'std::array<INPUT,6>' in minor,
- 'MINOR_NATIVE_HOLD_PRESERVED':'MinorDelayUs(timer,1000,freq)' in sender,
- 'MINOR_RELEASE_GAP_PRESERVED':'MinorDelayUs(timer,75,freq)' in sender,
+ 'MINOR_NATIVE_HOLD_PRESERVED':'MinorDelayUs(1000,freq)' in sender,
+ 'MINOR_RELEASE_GAP_PRESERVED':'MinorDelayUs(75,freq)' in sender,
  'MINOR_GENERIC_TRANSPORT_UNCHANGED':'void PreciseDelayUs(int microseconds)' in new and 'UINT ReferenceSendInputsUnlocked' in new,
- 'MINOR_CPU_TEST_MODE':'--minor-cpu-timing-test' in new and 'MeasuredHz=' in cpu_test and 'ThreadCpuPct=' in cpu_test,
+ 'MINOR_NO_NEW_TIMER_APIS':all(x not in new for x in ['CreateWaitableTimerExW','CreateWaitableTimerW','SetWaitableTimer','GetThreadTimes','GetCurrentThread']),
+ 'MINOR_TIMING_TEST_MODE':'--minor-timing-test' in new and 'MeasuredHz=' in timing_test and 'minor-timing-report.txt' in timing_test,
 }
 for k,v in checks.items():
     print(k+'=' + ('PASS' if v else 'FAIL'))
