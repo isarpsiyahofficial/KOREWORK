@@ -14,12 +14,14 @@ def body(s,sig):
             if d==0:return s[p:i+1]
     raise SystemExit('UNCLOSED '+sig)
 
+# Deliberate hotfix scope: ExecuteAttack/Attack UI and WarriorRightClickSlot are allowed
+# to change; all unrelated runtime workers/pages remain byte-for-byte protected.
 protected=[
  'void CureWorker()','void RWorker()','void VitalsWorker()','void MobSkillWorker()',
  'void MobChaseWorker()','void MobScrollWorker()','void MobPriestWorker()',
  'void WarriorWorker()','void WarriorEchoWorker()','void WarriorBattleCryWorker()',
- 'bool WarriorRightClickSlot','bool WarriorResolveInventory','void CreateWarriorPage()',
- 'void CreateRoguePage()','void CreateAttackPage()','void CreatePriestPage()'
+ 'bool WarriorResolveInventory','void CreateWarriorPage()',
+ 'void CreateRoguePage()','void CreatePriestPage()'
 ]
 for sig in protected:
     if body(old,sig)!=body(new,sig): raise SystemExit('PROTECTED_FUNCTION_CHANGED '+sig)
@@ -37,6 +39,8 @@ pulse_wait=body(new,'void MinorPulseWaitUntil(')
 cycle_wait=body(new,'void MinorCycleWaitUntil(')
 sender=body(new,'UINT MinorSendInputsLowCpu(')
 timing_test=body(new,'bool RunMinorTimingTest()')
+warrior_equip=body(new,'bool WarriorRightClickSlot')
+attack_page=body(new,'void CreateAttackPage()')
 injected=minor+pulse_wait+cycle_wait+sender+timing_test
 forbidden=['CreateWaitableTimerExW','CreateWaitableTimerW','SetWaitableTimer','GetThreadTimes','GetCurrentThread']
 
@@ -78,6 +82,15 @@ checks={
  'MINOR_GENERIC_TRANSPORT_UNCHANGED':'void PreciseDelayUs(int microseconds)' in new and 'UINT ReferenceSendInputsUnlocked' in new,
  'MINOR_PATCH_NO_NEW_APIS':all(x not in injected for x in forbidden),
  'MINOR_TIMING_TEST_MODE':'--minor-timing-test' in new and 'MeasuredHz=' in timing_test and 'minor-timing-report.txt' in timing_test,
+
+ 'WARRIOR_EQUIP_RETRIES':'for(int attempt=0;attempt<3&&!changed;attempt++)' in warrior_equip,
+ 'WARRIOR_EQUIP_VISUAL_CONFIRM':'WarriorWaitSlotChanged(grid,slot,before,100)' in warrior_equip and 'return changed;' in warrior_equip,
+ 'WARRIOR_EQUIP_CLOSE_AFTER_CONFIRM':'if(changed)Sleep(20);' in warrior_equip and "ReferenceTapKeyUnlocked('I')" in warrior_equip,
+ 'ATTACK_R_RUNTIME':"if(a.rAttack){PreciseDelayUs(1500);ReferenceTapKeyUnlocked('R');}" in execute,
+ 'ATTACK_DYNAMIC_RUNTIME':'SkillEntry skill;if(!NextAttackSkill(a,skill))' in execute,
+ 'ATTACK_DYNAMIC_ROWS':'kMaxAttackExtraUi' in attack_page and 'attackExtraRowBar' in attack_page and 'attackExtraRowSlot' in attack_page,
+ 'ATTACK_NO_LISTBOX':'attackExtraList=Ctrl(L"LISTBOX"' not in attack_page,
+ 'ATTACK_PLUS_UI':'Label(L"Skill Ekle"' in attack_page and 'Ctrl(L"BUTTON",L"+"' in attack_page,
 }
 for k,v in checks.items():
     print(k+'=' + ('PASS' if v else 'FAIL'))
