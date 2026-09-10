@@ -17,30 +17,33 @@ def span(src,sig):
             if depth==0: return start,i+1
     raise SystemExit('UNCLOSED '+sig)
 
-# Minor-only scheduler. Keep the 120/240 cycle rates, but stop spinning for the
-# whole idle portion. Sleep(1) is used only when enough slack exists (>~1.5 ms),
-# Sleep(0) yields medium waits, and only the last ~100 us is a precision spin.
-# Native key pulses are short explicit DOWN/UP events; each pair owns the shared
-# input gate separately so Minor cannot monopolize every other feature for the
-# full 8>9>0 sequence.
+# Minor-only timing. Pulse waits are sub-ms and use cooperative yields plus a
+# ~80 us precision tail. Cycle waits use Sleep(1) aggressively and may wake a
+# little late; absolute nextTick scheduling compensates on the following cycle,
+# preserving the 120/240 average cadence without burning a core between cycles.
 insert_at,_=span(s,'std::vector<INPUT> BuildMinorBatch(')
-helpers=r'''constexpr int kMinorNativeHoldUs=350;
-constexpr int kMinorNativeGapUs=50;
-void MinorWaitUntil(LONGLONG target,LONGLONG freq){
-  LARGE_INTEGER now{};
-  const LONGLONG spinTicks=std::max<LONGLONG>(1,freq/10000); // ~100 us precision tail
-  const LONGLONG sleepFloor=std::max<LONGLONG>(spinTicks+1,freq/667); // ~1.5 ms
+helpers=r'''constexpr int kMinorNativeHoldUs=300;
+constexpr int kMinorNativeGapUs=30;
+void MinorPulseWaitUntil(LONGLONG target,LONGLONG freq){
+  LARGE_INTEGER now{};const LONGLONG spinTicks=std::max<LONGLONG>(1,freq/12500); // ~80 us
   for(;;){
     QueryPerformanceCounter(&now);LONGLONG left=target-now.QuadPart;if(left<=0)break;
-    if(left>sleepFloor){Sleep(1);continue;}
     if(left>spinTicks){Sleep(0);continue;}
     YieldProcessor();
+  }
+}
+void MinorCycleWaitUntil(LONGLONG target,LONGLONG freq){
+  LARGE_INTEGER now{};const LONGLONG finishTicks=std::max<LONGLONG>(1,freq/2000); // ~500 us
+  for(;;){
+    QueryPerformanceCounter(&now);LONGLONG left=target-now.QuadPart;if(left<=0)return;
+    if(left>finishTicks){Sleep(1);continue;}
+    MinorPulseWaitUntil(target,freq);return;
   }
 }
 void MinorDelayUs(int us,LONGLONG freq){
   if(us<=0)return;LARGE_INTEGER now{};QueryPerformanceCounter(&now);
   const LONGLONG ticks=std::max<LONGLONG>(1,(freq*(LONGLONG)us)/1000000LL);
-  MinorWaitUntil(now.QuadPart+ticks,freq);
+  MinorPulseWaitUntil(now.QuadPart+ticks,freq);
 }
 UINT MinorSendInputsLowCpu(const INPUT* inputs,UINT count,LONGLONG freq){
   if(!inputs||!count)return 0;
@@ -59,7 +62,7 @@ UINT MinorSendInputsLowCpu(const INPUT* inputs,UINT count,LONGLONG freq){
         MinorDelayUs(kMinorNativeHoldUs,freq);
         INPUT second=NativeNormalizedInput(inputs[done+1]);
         if(SendInput(1,&second,sizeof(INPUT))!=1){
-          MinorDelayUs(100,freq);
+          MinorDelayUs(80,freq);
           if(SendInput(1,&second,sizeof(INPUT))!=1)break;
         }
         done+=2;
@@ -84,7 +87,7 @@ minor_replacement=r'''void MinorWorker(){
     if(!r.powerEnabled||!g_rogueCategoryEnabled||!g_minorActive||g_cureExclusive||g_potionExclusive||g_chatMode){nextTick=0;autoKnownBar=0;autoWasRunning=false;Sleep(2);continue;}
     int rate=g_turbo.load()?240:120;LARGE_INTEGER now{};QueryPerformanceCounter(&now);LONGLONG step=std::max<LONGLONG>(1,fq.QuadPart/rate);
     if(!nextTick||rate!=lastRate){nextTick=now.QuadPart;lastRate=rate;}
-    if(now.QuadPart<nextTick){MinorWaitUntil(nextTick,fq.QuadPart);continue;}
+    if(now.QuadPart<nextTick){MinorCycleWaitUntil(nextTick,fq.QuadPart);continue;}
     RogueSettings fresh;{std::lock_guard<std::mutex>lk(g_settingsMutex);fresh=g_rogue;}
     if(!fresh.powerEnabled||!g_rogueCategoryEnabled||!g_minorActive||g_cureExclusive||g_potionExclusive||g_chatMode){nextTick=0;autoKnownBar=0;autoWasRunning=false;continue;}
     const bool autoOwned=g_autoMinorOwned.load(std::memory_order_acquire)&&fresh.autoMinorEnabled;
@@ -108,15 +111,13 @@ minor_replacement=r'''void MinorWorker(){
 }'''
 s=s[:a]+minor_replacement+s[b:]
 
-# Compiled-release cadence gate exercises the same production wait algorithm at
-# Turbo 240 cycles/s and the same three native key pulses per cycle.
 insert,_=span(s,'bool RunSelfTest()')
 timing_test=r'''bool RunMinorTimingTest(){
   timeBeginPeriod(1);LARGE_INTEGER fq{},start{},now{};QueryPerformanceFrequency(&fq);QueryPerformanceCounter(&start);
-  LONGLONG next=start.QuadPart;const int rate=240,cycles=480;const LONGLONG step=std::max<LONGLONG>(1,fq.QuadPart/rate);
+  LONGLONG next=start.QuadPart;const int rate=240,cycles=720;const LONGLONG step=std::max<LONGLONG>(1,fq.QuadPart/rate);
   for(int i=0;i<cycles;i++){
     for(int k=0;k<3;k++){MinorDelayUs(kMinorNativeHoldUs,fq.QuadPart);MinorDelayUs(kMinorNativeGapUs,fq.QuadPart);}
-    next+=step;QueryPerformanceCounter(&now);if(now.QuadPart<next)MinorWaitUntil(next,fq.QuadPart);else if(now.QuadPart-next>step*2)next=now.QuadPart;
+    next+=step;QueryPerformanceCounter(&now);if(now.QuadPart<next)MinorCycleWaitUntil(next,fq.QuadPart);else if(now.QuadPart-next>step*2)next=now.QuadPart;
   }
   QueryPerformanceCounter(&now);timeEndPeriod(1);
   double wallMs=1000.0*(double)(now.QuadPart-start.QuadPart)/(double)fq.QuadPart;double hz=wallMs>0?cycles*1000.0/wallMs:0.0;
@@ -140,11 +141,11 @@ checks={
  'MAX_RATE_120':'?240:120' in minor,
  'TURBO_RATE_240':'?240:120' in minor,
  'MANUAL_THREE_PAIRS':'std::array<INPUT,6>' in minor,
- 'LOW_CPU_WAIT':'MinorWaitUntil(nextTick' in minor and 'MinorSendInputsLowCpu' in minor,
+ 'LOW_CPU_CYCLE_WAIT':'MinorCycleWaitUntil(nextTick' in minor,
  'CACHED_BATCH':'cachedSeq!=fresh.seq' in minor,
  'SIDEINPUT_GUARD':'g_attackExclusive.load' in minor and 'g_wsPriority.load' in minor,
  'PAIR_LEVEL_FIFO':'FifoTicketGuard sequence(g_gameInputGate);' in sender and 'FifoTicketGuard sequence(g_gameInputGate);\n      MinorSendInputsLowCpu' not in minor,
- 'SHORT_NATIVE_PULSE':'kMinorNativeHoldUs=350' in helpers and 'kMinorNativeGapUs=50' in helpers,
+ 'SHORT_NATIVE_PULSE':'kMinorNativeHoldUs=300' in helpers and 'kMinorNativeGapUs=30' in helpers,
  'GENERIC_PRECISE_DELAY_UNTOUCHED':'void PreciseDelayUs(int microseconds)' in s,
  'NO_NEW_APIS_IN_CPU_PATCH':all(x not in injected for x in forbidden),
  'TIMING_TEST_MODE':'--minor-timing-test' in s and 'minor-timing-report.txt' in s,
