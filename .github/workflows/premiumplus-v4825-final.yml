@@ -2,16 +2,18 @@ name: PremiumPlus v4.8.25 FINAL
 
 on:
   push:
-    branches: [ premiumplus-v4825-mob-ui-runtime-fix ]
+    branches: [ premiumplus-v4825-mob-ui-runtime-fix, fix/premiumplus-v4825-attack-sideinput-20260910 ]
     paths:
       - '.github/workflows/premiumplus-v4825-final.yml'
       - 'premium_plus_combo_final/workbench/build_v4825_final_source.py'
       - 'premium_plus_combo_final/workbench/post_v4825_mob_ui_runtime_fix.py'
       - 'premium_plus_combo_final/workbench/post_v4825_responsive_layout.py'
       - 'premium_plus_combo_final/workbench/post_v4825_compile_order_fix.py'
+      - 'premium_plus_combo_final/workbench/post_v4825_attack_sideinput_fix.py'
       - 'premium_plus_combo_final/workbench/audit_v4825_static.py'
       - 'premium_plus_combo_final/workbench/audit_v4825_pe.py'
       - 'premium_plus_combo_final/workbench/v4825_mob_ui_scenario_tests.py'
+      - 'premium_plus_combo_final/workbench/v4825_attack_sideinput_tests.py'
       - 'docs/premiumpluscombo/**'
   workflow_dispatch:
 
@@ -41,6 +43,10 @@ jobs:
           if($LASTEXITCODE){throw 'v4.8.25 MOB/UI scenario tests failed'}
           $ui=Get-Content premium_plus_combo_final/workbench/v4825-mob-ui-scenario-report.txt -Raw
           if($ui -notmatch 'TOTAL=20' -or $ui -notmatch 'PASSED=20'){throw '20/20 v4.8.25 MOB/UI scenario gate failed'}
+          python premium_plus_combo_final/workbench/v4825_attack_sideinput_tests.py
+          if($LASTEXITCODE){throw 'v4.8.25 ATTACK/side-input scenario tests failed'}
+          $side=Get-Content premium_plus_combo_final/workbench/v4825-attack-sideinput-report.txt -Raw
+          if($side -notmatch 'TOTAL=13' -or $side -notmatch 'PASSED=13'){throw '13/13 ATTACK/side-input gate failed'}
 
       - name: Build known-good control and v4.8.25 release
         shell: pwsh
@@ -130,8 +136,8 @@ jobs:
           if(Test-Path defender-scan.txt){$d=Get-Content defender-scan.txt -Raw;if($d -match 'found no threats'){$def='NO_THREATS'}elseif($d -match 'Threat'){$def='SEE_DEFENDER_LOG'}}
           @(
             'Product=PremiumPlusCombo',
-            'Version=4.8.25',
-            'Base=v4.8.24 FINAL',
+            'Version=4.8.25-sideinput-hotfix',
+            'Base=v4.8.25 FINAL validated 2026-09-08',
             "SourceSHA256=$src",
             "EXE_SHA256=$sha",
             'StableCorePreserved=PASS',
@@ -141,6 +147,11 @@ jobs:
             'MobSelectorScenario=48/48 PASS',
             'RealWindowsMouseSelect=9/9 PASS',
             'MobUiRuntimeScenario=20/20 PASS',
+            'AttackSideInputScenario=13/13 PASS',
+            'AttackPotionStateResetRemoved=PASS',
+            'AttackWsPotionCancellationRemoved=PASS',
+            'AutoMinorYieldsToAttackCriticalInput=PASS',
+            'HpMpToggleImmediatePersist=PASS',
             'ResponsiveLayoutDpi100_125_150_200=PASS',
             'PriestSidebarStyle=PASS',
             'MobTabIsolation=PASS',
@@ -156,7 +167,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: PremiumPlus-v4.8.25-FINAL
+          name: PremiumPlus-v4.8.25-SIDEINPUT-HOTFIX
           if-no-files-found: error
           retention-days: 90
           path: |
@@ -170,5 +181,6 @@ jobs:
             premium_plus_combo_final/workbench/mob-selector-scenario-report.txt
             premium_plus_combo_final/workbench/mob-selector-manual-click-report.txt
             premium_plus_combo_final/workbench/v4825-mob-ui-scenario-report.txt
+            premium_plus_combo_final/workbench/v4825-attack-sideinput-report.txt
             premium_plus_combo_final/workbench/import-audit.txt
             premium_plus_combo_final/workbench/defender-scan.txt
