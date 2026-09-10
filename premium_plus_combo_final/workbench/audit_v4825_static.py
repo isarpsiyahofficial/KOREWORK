@@ -33,10 +33,11 @@ maybe_ws=body(new,'void MaybeSendWsCombo(')
 wait_ws=body(new,'bool WaitWsCycleCompletion(const AttackSettings& a)')
 potion=body(new,'bool UsePotion(bool hp,const AttackSettings&a)')
 wnd=body(new,'LRESULT CALLBACK WndProc(')
-waiter=body(new,'void MinorWaitUntil(')
+pulse_wait=body(new,'void MinorPulseWaitUntil(')
+cycle_wait=body(new,'void MinorCycleWaitUntil(')
 sender=body(new,'UINT MinorSendInputsLowCpu(')
 timing_test=body(new,'bool RunMinorTimingTest()')
-injected=minor+waiter+sender+timing_test
+injected=minor+pulse_wait+cycle_wait+sender+timing_test
 forbidden=['CreateWaitableTimerExW','CreateWaitableTimerW','SetWaitableTimer','GetThreadTimes','GetCurrentThread']
 
 checks={
@@ -66,16 +67,14 @@ checks={
  'HP_MP_TOGGLE_PERSISTS':'case IDC_HP_CHECK:ReadAttackUi(true);break;' in wnd and 'case IDC_MP_CHECK:ReadAttackUi(true);break;' in wnd,
 
  'MINOR_RATE_120_240':'g_turbo.load()?240:120' in minor,
- 'MINOR_LONG_IDLE_SLEEPS':'if(left>sleepFloor){Sleep(1);continue;}' in waiter,
- 'MINOR_MEDIUM_WAIT_YIELDS':'if(left>spinTicks){Sleep(0);continue;}' in waiter,
- 'MINOR_PRECISION_TAIL':'freq/10000' in waiter,
- 'MINOR_SLEEP_FLOOR_1P5MS':'freq/667' in waiter,
- 'MINOR_OUTER_SPIN_REMOVED':'if(now.QuadPart<nextTick){MinorWaitUntil(nextTick' in minor,
+ 'MINOR_CYCLE_SLEEP':'Sleep(1)' in cycle_wait and 'freq/2000' in cycle_wait,
+ 'MINOR_PULSE_COOPERATIVE_YIELD':'Sleep(0)' in pulse_wait and 'freq/12500' in pulse_wait,
+ 'MINOR_OUTER_WAIT':'MinorCycleWaitUntil(nextTick' in minor,
  'MINOR_MANUAL_LOWCPU_PATH':'MinorSendInputsLowCpu(manualBatch.data()' in minor,
  'MINOR_BATCH_CACHED':'cachedSeq!=fresh.seq' in minor and 'std::array<INPUT,6>' in minor,
  'MINOR_PAIR_LEVEL_FIFO':'FifoTicketGuard sequence(g_gameInputGate);' in sender and 'FifoTicketGuard sequence(g_gameInputGate);\n      MinorSendInputsLowCpu' not in minor,
- 'MINOR_NATIVE_PULSE_350US':'kMinorNativeHoldUs=350' in new,
- 'MINOR_NATIVE_GAP_50US':'kMinorNativeGapUs=50' in new,
+ 'MINOR_NATIVE_PULSE_300US':'kMinorNativeHoldUs=300' in new,
+ 'MINOR_NATIVE_GAP_30US':'kMinorNativeGapUs=30' in new,
  'MINOR_GENERIC_TRANSPORT_UNCHANGED':'void PreciseDelayUs(int microseconds)' in new and 'UINT ReferenceSendInputsUnlocked' in new,
  'MINOR_PATCH_NO_NEW_APIS':all(x not in injected for x in forbidden),
  'MINOR_TIMING_TEST_MODE':'--minor-timing-test' in new and 'MeasuredHz=' in timing_test and 'minor-timing-report.txt' in timing_test,
