@@ -9,5 +9,12 @@ old2='g_ui.saveAttack=Ctrl(L"BUTTON",L"ATTACK AYARLARINI KAYDET",BS_PUSHBUTTON,k
 new2='g_ui.saveAttack=Ctrl(L"BUTTON",L"ATTACK AYARLARINI KAYDET",BS_PUSHBUTTON,kContentX,518,224,24,1599,g_fontBold);'
 if s.count(old2)!=1: raise SystemExit(f'Attack save marker count={s.count(old2)}')
 s=s.replace(old2,new2,1)
+# Preserve the validated PE import surface: + / - safely no-op at bounds instead of importing EnableWindow.
+for marker in [
+    '  if(g_ui.attackExtraRemove)EnableWindow(g_ui.attackExtraRemove,!a.extraSkills.empty());\n',
+    '  if(g_ui.attackExtraAdd)EnableWindow(g_ui.attackExtraAdd,a.extraSkills.size()<kMaxAttackExtraUi);\n',
+]:
+    if s.count(marker)!=1: raise SystemExit(f'EnableWindow marker count={s.count(marker)}')
+    s=s.replace(marker,'',1)
 p.write_text(s,encoding='utf-8')
 print('V4825_ATTACK_DYNAMIC_VISIBILITY_FIX=APPLIED')
