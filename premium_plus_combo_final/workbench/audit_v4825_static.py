@@ -36,6 +36,8 @@ wnd=body(new,'LRESULT CALLBACK WndProc(')
 waiter=body(new,'void MinorWaitUntil(')
 sender=body(new,'UINT MinorSendInputsLowCpu(')
 timing_test=body(new,'bool RunMinorTimingTest()')
+injected=minor+waiter+sender+timing_test
+forbidden=['CreateWaitableTimerExW','CreateWaitableTimerW','SetWaitableTimer','GetThreadTimes','GetCurrentThread']
 
 checks={
  'VERSION_4825':'Premium Plus Combo | v4.8.25' in new,
@@ -73,7 +75,7 @@ checks={
  'MINOR_NATIVE_HOLD_PRESERVED':'MinorDelayUs(1000,freq)' in sender,
  'MINOR_RELEASE_GAP_PRESERVED':'MinorDelayUs(75,freq)' in sender,
  'MINOR_GENERIC_TRANSPORT_UNCHANGED':'void PreciseDelayUs(int microseconds)' in new and 'UINT ReferenceSendInputsUnlocked' in new,
- 'MINOR_NO_NEW_TIMER_APIS':all(x not in new for x in ['CreateWaitableTimerExW','CreateWaitableTimerW','SetWaitableTimer','GetThreadTimes','GetCurrentThread']),
+ 'MINOR_PATCH_NO_NEW_APIS':all(x not in injected for x in forbidden),
  'MINOR_TIMING_TEST_MODE':'--minor-timing-test' in new and 'MeasuredHz=' in timing_test and 'minor-timing-report.txt' in timing_test,
 }
 for k,v in checks.items():
