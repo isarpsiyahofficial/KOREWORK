@@ -17,9 +17,9 @@ def span(src,sig):
             if depth==0: return start,i+1
     raise SystemExit('UNCLOSED '+sig)
 
-# Minor-only low-CPU timing path. Uses APIs that are already present in the
-# validated import surface: QPC + Sleep. Long waits sleep; only the final tiny
-# precision tail spins. Generic transport remains untouched for other modules.
+# Minor-only low-CPU timing path. Uses APIs already present in the validated
+# release import surface: QueryPerformanceCounter + Sleep. Long waits sleep;
+# only the final tiny precision tail spins. Generic transport stays untouched.
 insert_at,_=span(s,'std::vector<INPUT> BuildMinorBatch(')
 helpers=r'''void MinorWaitUntil(LONGLONG target,LONGLONG freq){
   LARGE_INTEGER now{};
@@ -70,7 +70,7 @@ UINT MinorSendInputsLowCpu(const INPUT* inputs,UINT count,LONGLONG freq){
 s=s[:insert_at]+helpers+s[insert_at:]
 
 a,b=span(s,'void MinorWorker()')
-new=r'''void MinorWorker(){
+minor_replacement=r'''void MinorWorker(){
   timeBeginPeriod(1);LARGE_INTEGER fq{};QueryPerformanceFrequency(&fq);
   LONGLONG nextTick=0;int lastRate=0;int autoKnownBar=0;bool autoWasRunning=false;
   std::array<INPUT,6> manualBatch{};std::array<int,3> cachedSeq{-1,-1,-1};bool batchReady=false;
@@ -102,13 +102,13 @@ new=r'''void MinorWorker(){
   }
   timeEndPeriod(1);
 }'''
-s=s[:a]+new+s[b:]
+s=s[:a]+minor_replacement+s[b:]
 
-# Compiled release timing gate: actual production wait helpers, native workload
-# shape, no additional Kernel32 imports. CPU percentage is measured by a separate
-# CI benchmark executable so the release PE surface stays exact.
+# Compiled release timing gate. It exercises the exact production wait helpers
+# at Turbo's 240-cycle/s target. CPU percentage is measured by a separate CI
+# benchmark executable so the production PE/import surface is not enlarged.
 insert,_=span(s,'bool RunSelfTest()')
-test=r'''bool RunMinorTimingTest(){
+timing_test=r'''bool RunMinorTimingTest(){
   timeBeginPeriod(1);LARGE_INTEGER fq{},start{},now{};QueryPerformanceFrequency(&fq);QueryPerformanceCounter(&start);
   LONGLONG next=start.QuadPart;const int rate=240,cycles=240;const LONGLONG step=std::max<LONGLONG>(1,fq.QuadPart/rate);
   for(int i=0;i<cycles;i++){
@@ -123,13 +123,15 @@ test=r'''bool RunMinorTimingTest(){
 }
 
 '''
-s=s[:insert]+test+s[insert:]
+s=s[:insert]+timing_test+s[insert:]
 
 needle='int APIENTRY wWinMain(HINSTANCE hi,HINSTANCE,LPWSTR cmd,int show){g_instance=hi;'
 if needle not in s: raise SystemExit('WMAIN_MARKER_MISSING')
 s=s.replace(needle,needle+'if(cmd&&wcsstr(cmd,L"--minor-timing-test"))return RunMinorTimingTest()?0:10;',1)
 
 minor=s[span(s,'void MinorWorker()')[0]:span(s,'void MinorWorker()')[1]]
+injected=helpers+minor_replacement+timing_test
+forbidden=['CreateWaitableTimerExW','CreateWaitableTimerW','SetWaitableTimer','GetThreadTimes','GetCurrentThread']
 checks={
  'MAX_RATE_120':'?240:120' in minor,
  'TURBO_RATE_240':'?240:120' in minor,
@@ -138,7 +140,7 @@ checks={
  'CACHED_BATCH':'cachedSeq!=fresh.seq' in minor,
  'SIDEINPUT_GUARD':'g_attackExclusive.load' in minor and 'g_wsPriority.load' in minor,
  'GENERIC_PRECISE_DELAY_UNTOUCHED':'void PreciseDelayUs(int microseconds)' in s,
- 'NO_NEW_TIMER_IMPORTS':all(x not in s for x in ['CreateWaitableTimerExW','CreateWaitableTimerW','SetWaitableTimer','GetThreadTimes','GetCurrentThread']),
+ 'NO_NEW_APIS_IN_CPU_PATCH':all(x not in injected for x in forbidden),
  'TIMING_TEST_MODE':'--minor-timing-test' in s and 'minor-timing-report.txt' in s,
 }
 for k,v in checks.items():
