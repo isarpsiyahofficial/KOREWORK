@@ -1,0 +1,8 @@
+Rogue v4.8.26 implementation scope
+- Preserve v4.8.25 idle-CPU/game-input runtime baseline.
+- Add separate hotkeys for 800 DEF, 400 DEF, Bıçak At, M20 Bas.
+- Each quick-skill row has Bar + Slot + dedicated hotkey.
+- Bıçak At and M20 trigger a 1000 ms R-pause window when Attack R is enabled to prevent bar/tab drift.
+- Add one custom Rogue skill row: Bar + Slot + MS + dedicated hotkey.
+- Add Mana Silme / Bow Swap: dedicated hotkey, inventory bow slot, skill Bar + Slot, automatic same-slot swap-in/cast/swap-back, preserves inventory open state when possible.
+- Responsive/native layout; existing Rogue features retained.
