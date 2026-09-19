@@ -1,0 +1,33 @@
+name: Export 062F timed exact source
+
+on:
+  push:
+    branches: [ fix/premiumplus-v4828-client-ack-bridge-20260919 ]
+    paths:
+      - '.github/workflows/export-062f-timed-exact.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct
+        run: |
+          python - <<'PY'
+          import base64,gzip,pathlib,hashlib
+          p=pathlib.Path('premium_plus_combo_final/source/timed_exact')
+          raw=gzip.decompress(base64.b64decode(''.join(x.read_text().strip() for x in sorted(p.glob('part*.txt')))))
+          sha=hashlib.sha256(raw).hexdigest()
+          print('SHA='+sha)
+          assert sha=='d522959ea955ef788af1df00dfff2dd30bd8566fcbb728823ed39de542d19535'
+          pathlib.Path('062f-timed-exact.cpp').write_bytes(raw)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-062f-timed-exact
+          path: 062f-timed-exact.cpp
+          retention-days: 7
