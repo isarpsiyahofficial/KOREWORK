@@ -85,11 +85,11 @@ jobs:
           $p=Start-Process .\directinput-sendinput-harness.exe -Wait -PassThru
           if($p.ExitCode){
             if(Test-Path directinput-sendinput-report.txt){Get-Content directinput-sendinput-report.txt}
-            throw 'Windows SendInput was not visible to a DirectInput keyboard consumer'
+            throw 'No tested standard Windows keyboard injection method was visible to DirectInput'
           }
           $r=Get-Content directinput-sendinput-report.txt -Raw
           Get-Content directinput-sendinput-report.txt
-          if($r -notmatch 'SyntheticDownSeenByDirectInput=PASS' -or $r -notmatch 'SyntheticReleaseSeenByDirectInput=PASS' -or $r -notmatch 'RESULT=PASS'){throw 'DirectInput gate failed'}
+          if($r -notmatch 'AnyStandardKeyboardInjectionVisible=PASS' -or $r -notmatch 'RESULT=PASS'){throw 'DirectInput standard injection matrix failed'}
 
       - name: Run executable regressions
         shell: pwsh
@@ -145,7 +145,7 @@ jobs:
             'BridgeRoute=1-0_AND_R',
             'Fallback=SCANCODE_SENDINPUT',
             'RuntimeRouteIndicator=BRIDGE_OR_NATIVE',
-            'DirectInputSendInputHarness=PASS',
+            'DirectInputStandardInjectionMatrix=PASS',
             'LegacySelfTest=180/180 PASS',
             'TransportObserver=PASS',
             'AttackObservers=PASS',
