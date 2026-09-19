@@ -1,0 +1,35 @@
+name: DirectInput Hold Sweep
+
+on:
+  push:
+    branches: [ fix/premiumplus-v4828-client-ack-bridge-20260919 ]
+    paths:
+      - '.github/workflows/directinput-hold-sweep.yml'
+      - 'premium_plus_combo_final/workbench/directinput_hold_sweep.cpp'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with: { arch: x64 }
+      - name: Compile and measure
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 directinput_hold_sweep.cpp /Fe:directinput-hold-sweep.exe user32.lib dinput8.lib dxguid.lib /link /SUBSYSTEM:WINDOWS
+          if($LASTEXITCODE){throw 'compile failed'}
+          $p=Start-Process .\directinput-hold-sweep.exe -Wait -PassThru
+          if(Test-Path directinput-hold-sweep-report.txt){Get-Content directinput-hold-sweep-report.txt}
+          if($p.ExitCode){throw 'hold sweep failed'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DirectInput-Hold-Sweep
+          path: premium_plus_combo_final/workbench/directinput-hold-sweep-report.txt
+          retention-days: 14
