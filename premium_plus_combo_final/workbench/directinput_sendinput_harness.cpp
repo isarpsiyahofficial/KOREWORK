@@ -6,6 +6,7 @@
 #include <dinput.h>
 #include <fstream>
 #include <functional>
+#include <thread>
 #pragma comment(lib,"user32.lib")
 #pragma comment(lib,"dinput8.lib")
 #pragma comment(lib,"dxguid.lib")
