@@ -1,0 +1,187 @@
+name: PremiumPlus v4.8.28 062F LIVE INPUT RESTORE
+
+on:
+  push:
+    branches: [ fix/premiumplus-v4828-client-ack-bridge-20260919 ]
+    paths:
+      - '.github/workflows/premiumplus-v4828-062f-input.yml'
+      - 'premium_plus_combo_final/workbench/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  final:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Validate unchanged v4.8.26 base
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python premium_plus_combo_final/workbench/build_v4825_final_source.py
+          if($LASTEXITCODE){throw 'base source build failed'}
+          python premium_plus_combo_final/workbench/audit_v4826_compat.py
+          if($LASTEXITCODE){throw 'v4.8.26 compatibility audit failed'}
+          python premium_plus_combo_final/workbench/v4826_rogue_skill_tests.py
+          if($LASTEXITCODE){throw 'Rogue feature regression failed'}
+          python premium_plus_combo_final/workbench/v4825_mob_ui_scenario_tests.py
+          if($LASTEXITCODE){throw 'MOB UI regression failed'}
+          python premium_plus_combo_final/workbench/v4825_attack_sideinput_tests.py
+          if($LASTEXITCODE){throw 'Attack side-input regression failed'}
+          python premium_plus_combo_final/workbench/v4825_warrior_attack_ui_tests.py
+          if($LASTEXITCODE){throw 'Warrior/Attack UI regression failed'}
+          python premium_plus_combo_final/workbench/v4825_idle_cpu_tests.py
+          if($LASTEXITCODE){throw 'base idle CPU regression failed'}
+
+      - name: Generate exact 062F input restore
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python premium_plus_combo_final/workbench/build_v4828_062f_input_source.py
+          if($LASTEXITCODE){throw 'v4.8.28 source generation failed'}
+          python premium_plus_combo_final/workbench/v4828_062f_input_tests.py
+          if($LASTEXITCODE){throw '062F exact input preservation gates failed'}
+
+      - name: Build v4.8.28 release and control
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.11.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"></assemblyIdentity><description>Premium Plus Combo - Control</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"></requestedExecutionLevel></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content control.manifest -Encoding UTF8
+          @'
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.28.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"></assemblyIdentity><description>Premium Plus Combo - 062F Live Input Restore</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"></requestedExecutionLevel></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content release.manifest -Encoding UTF8
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX makro2_v4811_exact.cpp /Fe:PremiumPlusCombo-v4.8.11-CONTROL.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'control compile failed'}
+          mt.exe -nologo -manifest control.manifest "-outputresource:PremiumPlusCombo-v4.8.11-CONTROL.exe;#1"
+          if($LASTEXITCODE){throw 'control manifest failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX premiumplus_v4828_062f_input.cpp /Fe:PremiumPlusCombo-v4.8.28-062F-INPUT-RESTORE.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'release compile failed'}
+          mt.exe -nologo -manifest release.manifest "-outputresource:PremiumPlusCombo-v4.8.28-062F-INPUT-RESTORE.exe;#1"
+          if($LASTEXITCODE){throw 'release manifest failed'}
+          Copy-Item PremiumPlusCombo-v4.8.28-062F-INPUT-RESTORE.exe PremiumPlusCombo-v4.8.25-FINAL.exe -Force
+          python audit_v4825_pe.py
+          if($LASTEXITCODE){throw 'PE/import audit failed'}
+          mt.exe -nologo -inputresource:PremiumPlusCombo-v4.8.28-062F-INPUT-RESTORE.exe`;#1 -out:embedded-v4828.manifest
+          if($LASTEXITCODE){throw 'manifest extract failed'}
+          $m=Get-Content embedded-v4828.manifest -Raw
+          if($m -notmatch 'requestedExecutionLevel level="requireAdministrator"'){throw 'requireAdministrator missing'}
+
+      - name: DirectInput compatibility gate
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 directinput_sendinput_harness.cpp /Fe:directinput-sendinput-harness.exe user32.lib dinput8.lib dxguid.lib /link /SUBSYSTEM:WINDOWS
+          if($LASTEXITCODE){throw 'DirectInput harness compile failed'}
+          $p=Start-Process .\directinput-sendinput-harness.exe -Wait -PassThru
+          if($p.ExitCode){
+            if(Test-Path directinput-sendinput-report.txt){Get-Content directinput-sendinput-report.txt}
+            throw 'Windows SendInput was not visible to a DirectInput keyboard consumer'
+          }
+          $r=Get-Content directinput-sendinput-report.txt -Raw
+          Get-Content directinput-sendinput-report.txt
+          if($r -notmatch 'SyntheticDownSeenByDirectInput=PASS' -or $r -notmatch 'SyntheticReleaseSeenByDirectInput=PASS' -or $r -notmatch 'RESULT=PASS'){throw 'DirectInput gate failed'}
+
+      - name: Run executable regressions
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process .\PremiumPlusCombo-v4.8.28-062F-INPUT-RESTORE.exe -ArgumentList '--minor-timing-test' -Wait -PassThru
+          if($p.ExitCode){throw '062F Minor timing model failed'}
+          $r=Get-Content minor-timing-report.txt -Raw
+          if($r -notmatch 'Reference=062F_LIVE_PROVEN_MANUAL_MINOR' -or $r -notmatch 'NativeHoldUs=1000' -or $r -notmatch 'NativeGapUs=50' -or $r -notmatch 'RESULT=PASS'){throw '062F timing identity failed'}
+          foreach($arg in @('--self-test','--transport-observer-test','--attack-r-extra-observer-test','--attack-observer-test','--attack-z-off-observer-test','--auto-minor-observer-test','--cure-observer-test','--mob-model-test','--warrior-model-test','--rogue-v4826-model-test')){
+            $p=Start-Process .\PremiumPlusCombo-v4.8.28-062F-INPUT-RESTORE.exe -ArgumentList $arg -Wait -PassThru
+            if($p.ExitCode){throw "$arg failed exit $($p.ExitCode)"}
+          }
+          $r=Get-Content self-test-report.txt -Raw
+          if($r -notmatch 'TOTAL=180' -or $r -notmatch 'PASSED=180'){throw 'legacy 180/180 failed'}
+          $r=Get-Content transport-observer-report.txt -Raw
+          if($r -notmatch 'ScanCodesNonZero=PASS' -or $r -notmatch 'Overlap=0' -or $r -notmatch 'RESULT=PASS'){throw 'transport observer failed'}
+
+      - name: Selector and real Windows mouse regressions
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          python mob_selector_scenario_model.py
+          if($LASTEXITCODE){throw 'selector model failed'}
+          $r=Get-Content mob-selector-scenario-report.txt -Raw
+          if($r -notmatch 'TOTAL=48' -or $r -notmatch 'PASSED=48'){throw '48/48 selector failed'}
+          cl /nologo /std:c++17 /O2 /MT /EHsc /DUNICODE /D_UNICODE mob_selector_manual_click_test.cpp /Fe:mob-selector-manual-click-test.exe user32.lib gdi32.lib /link /SUBSYSTEM:WINDOWS
+          if($LASTEXITCODE){throw 'mouse harness compile failed'}
+          $p=Start-Process .\mob-selector-manual-click-test.exe -Wait -PassThru
+          if($p.ExitCode){throw 'mouse harness failed'}
+          $r=Get-Content mob-selector-manual-click-report.txt -Raw
+          if($r -notmatch 'TOTAL=9' -or $r -notmatch 'PASSED=9'){throw '9/9 mouse failed'}
+
+      - name: Write candidate report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $sha=(Get-FileHash .\PremiumPlusCombo-v4.8.28-062F-INPUT-RESTORE.exe -Algorithm SHA256).Hash
+          $src=(Get-FileHash .\premiumplus_v4828_062f_input.cpp -Algorithm SHA256).Hash
+          @(
+            'Product=PremiumPlusCombo',
+            'Version=4.8.28-062F-input-restore',
+            'Base=v4.8.26-ROGUE-SKILLS',
+            'ReferenceWorkingBinarySHA256=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856',
+            'ManualMinorScheduler=062F_QPC_BURST_RESTORED',
+            'ManualMinorMaxHz=120',
+            'ManualMinorTurboHz=240',
+            'NativeKeyDownHoldUs=1000',
+            'NativePostKeyUpGapUs=50',
+            'NativeRetry=Sleep1ms',
+            'BridgeRoute=1-0_AND_R',
+            'Fallback=SCANCODE_SENDINPUT',
+            'RuntimeRouteIndicator=BRIDGE_OR_NATIVE',
+            'DirectInputSendInputHarness=PASS',
+            'LegacySelfTest=180/180 PASS',
+            'TransportObserver=PASS',
+            'AttackObservers=PASS',
+            'AutoMinorObserver=PASS',
+            'CureObserver=PASS',
+            'MobSelectorScenario=48/48 PASS',
+            'RealWindowsMouseSelect=9/9 PASS',
+            'ExactImportSurfaceVsV4811=PASS',
+            'ExecutionLevel=requireAdministrator',
+            "SourceSHA256=$src",
+            "EXE_SHA256=$sha",
+            'RealKnightOnlineVerification=REQUIRED',
+            'FinalClaim=NOT_MADE_UNTIL_REAL_GAME_PASS'
+          ) | Set-Content PremiumPlusCombo-v4.8.28-062F-INPUT-RESTORE-REPORT.txt
+          Get-Content PremiumPlusCombo-v4.8.28-062F-INPUT-RESTORE-REPORT.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlus-v4.8.28-062F-INPUT-RESTORE
+          if-no-files-found: error
+          retention-days: 90
+          path: |
+            premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.28-062F-INPUT-RESTORE.exe
+            premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.28-062F-INPUT-RESTORE-REPORT.txt
+            premium_plus_combo_final/workbench/premiumplus_v4828_062f_input.cpp
+            premium_plus_combo_final/workbench/v4828-062f-source-sha.txt
+            premium_plus_combo_final/workbench/embedded-v4828.manifest
+            premium_plus_combo_final/workbench/directinput-sendinput-report.txt
+            premium_plus_combo_final/workbench/minor-timing-report.txt
+            premium_plus_combo_final/workbench/self-test-report.txt
+            premium_plus_combo_final/workbench/transport-observer-report.txt
+            premium_plus_combo_final/workbench/attack-r-extra-observer-report.txt
+            premium_plus_combo_final/workbench/attack-observer-report.txt
+            premium_plus_combo_final/workbench/attack-z-off-observer-report.txt
+            premium_plus_combo_final/workbench/auto-minor-observer-report.txt
+            premium_plus_combo_final/workbench/cure-observer-report.txt
+            premium_plus_combo_final/workbench/mob-selector-scenario-report.txt
+            premium_plus_combo_final/workbench/mob-selector-manual-click-report.txt
+            premium_plus_combo_final/workbench/import-audit.txt
