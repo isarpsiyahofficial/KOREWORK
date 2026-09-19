@@ -1,0 +1,103 @@
+name: PremiumPlus v4.8.28 062F EXACT TRANSPORT
+on:
+  push:
+    branches: [ fix/premiumplus-v4828-062f-exact-transport-20260919 ]
+    paths:
+      - '.github/workflows/premiumplus-v4828-062f-exact.yml'
+      - 'premium_plus_combo_final/workbench/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with: {arch: x64}
+      - name: Generate and gate source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python premium_plus_combo_final/workbench/build_v4828_final_source.py
+          if($LASTEXITCODE){throw 'source build failed'}
+          python premium_plus_combo_final/workbench/v4828_062f_transport_tests.py
+          if($LASTEXITCODE){throw '062F transport gates failed'}
+          python premium_plus_combo_final/workbench/audit_v4826_compat.py
+          if($LASTEXITCODE){throw 'v4.8.26 compat audit failed'}
+          python premium_plus_combo_final/workbench/v4826_rogue_skill_tests.py
+          if($LASTEXITCODE){throw 'v4.8.26 feature gates failed'}
+      - name: Build x64
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.8.28.0" processorArchitecture="amd64" name="PremiumPlusCombo" type="win32"></assemblyIdentity><description>Premium Plus Combo - 062F Exact Transport</description><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"></requestedExecutionLevel></requestedPrivileges></security></trustInfo><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@ | Set-Content release.manifest -Encoding UTF8
+          cl /nologo /std:c++17 /O2 /MT /EHsc /utf-8 /DNOMINMAX premiumplus_v4828_final.cpp /Fe:PremiumPlusCombo-v4.8.28-062F-EXACT.exe user32.lib gdi32.lib advapi32.lib winmm.lib /link /SUBSYSTEM:WINDOWS /DYNAMICBASE /NXCOMPAT /MANIFEST:NO
+          if($LASTEXITCODE){throw 'compile failed'}
+          mt.exe -nologo -manifest release.manifest "-outputresource:PremiumPlusCombo-v4.8.28-062F-EXACT.exe;#1"
+          if($LASTEXITCODE){throw 'manifest failed'}
+          Copy-Item PremiumPlusCombo-v4.8.28-062F-EXACT.exe PremiumPlusCombo-v4.8.25-FINAL.exe -Force
+          python audit_v4825_pe.py
+          if($LASTEXITCODE){throw 'PE/import audit failed'}
+      - name: Executable regressions
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($arg in @('--self-test','--transport-observer-test','--attack-observer-test','--attack-z-off-observer-test','--cure-observer-test','--rogue-v4826-model-test')){
+            $p=Start-Process .\PremiumPlusCombo-v4.8.28-062F-EXACT.exe -ArgumentList $arg -Wait -PassThru
+            if($p.ExitCode){throw "$arg failed exit $($p.ExitCode)"}
+          }
+          $s=Get-Content self-test-report.txt -Raw
+          if($s -notmatch 'TOTAL=180' -or $s -notmatch 'PASSED=180'){throw '180/180 failed'}
+          $t=Get-Content transport-observer-report.txt -Raw
+          foreach($x in @('ScanCodesNonZero=PASS','Overlap=0','RESULT=PASS')){if($t -notmatch [regex]::Escape($x)){throw "transport missing $x"}}
+      - name: Report
+        shell: pwsh
+        working-directory: premium_plus_combo_final/workbench
+        run: |
+          $sha=(Get-FileHash .\PremiumPlusCombo-v4.8.28-062F-EXACT.exe -Algorithm SHA256).Hash
+          $src=(Get-FileHash .\premiumplus_v4828_final.cpp -Algorithm SHA256).Hash
+          @(
+            'Product=PremiumPlusCombo',
+            'Version=4.8.28-062F-EXACT',
+            'Base=v4.8.26-rogue-skills',
+            'TransportReference=062F1C4C43C97A69C993221383269D37EF4AFCEF9F26130A1387514405165856',
+            'Transport=KEYEVENTF_SCANCODE',
+            'Serialization=FIFO_TICKET_LOCK',
+            'GenericKeyDownHoldUs=1000',
+            'GenericReleaseGapUs=75',
+            'MinorNativeHoldUs=1000',
+            'MinorNativeGapUs=75',
+            'MinorMaxHz=120',
+            'MinorTurboHz=240',
+            'ExecutionLevel=requireAdministrator',
+            'LegacySelfTest=180/180 PASS',
+            'TransportObserver=PASS',
+            'AttackObserver=PASS',
+            'CureObserver=PASS',
+            'RogueV4826Model=PASS',
+            'ExactImportSurfaceVsV4811=PASS',
+            "SourceSHA256=$src",
+            "EXE_SHA256=$sha",
+            'RealGameVerification=USER_SIDE_REQUIRED'
+          ) | Set-Content PremiumPlusCombo-v4.8.28-062F-EXACT-REPORT.txt
+          Get-Content PremiumPlusCombo-v4.8.28-062F-EXACT-REPORT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PremiumPlus-v4.8.28-062F-EXACT
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.28-062F-EXACT.exe
+            premium_plus_combo_final/workbench/PremiumPlusCombo-v4.8.28-062F-EXACT-REPORT.txt
+            premium_plus_combo_final/workbench/premiumplus_v4828_final.cpp
+            premium_plus_combo_final/workbench/v4828-final-source-sha.txt
+            premium_plus_combo_final/workbench/self-test-report.txt
+            premium_plus_combo_final/workbench/transport-observer-report.txt
+            premium_plus_combo_final/workbench/attack-observer-report.txt
+            premium_plus_combo_final/workbench/cure-observer-report.txt
+            premium_plus_combo_final/workbench/import-audit.txt
